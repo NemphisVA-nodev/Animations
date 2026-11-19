@@ -132,8 +132,12 @@ def integrate_particles(
     """
     if not np.isfinite(duration_s) or duration_s <= 0.0:
         raise ValueError("duration_s must be positive")
-    if not isinstance(num_steps, (int, np.integer)) or isinstance(num_steps, (bool, np.bool_)) or num_steps < 2:
-        raise ValueError("num_steps must be at least 2")
+    if (
+        isinstance(num_steps, (bool, np.bool_))
+        or not isinstance(num_steps, (int, np.integer))
+        or num_steps < 2
+    ):
+        raise ValueError("num_steps must be an integer of at least 2")
     if not np.isfinite(rtol) or rtol <= 0.0:
         raise ValueError("rtol must be a positive finite value")
     if not np.isfinite(atol) or atol <= 0.0:

@@ -193,9 +193,9 @@ import numpy as np
 from pathlib import Path
 
 stem = Path("outputs/bh_radial_example_radial_infall")
-meta = json.loads(stem.with_suffix(".meta.json").read_text())
-data = np.load(stem.with_suffix(".data.npz"))
-arrays = {name: data[name] for name in data.files}
+meta = json.loads(stem.with_name(stem.name + ".meta.json").read_text())
+with np.load(stem.with_name(stem.name + ".data.npz"), allow_pickle=False) as data:
+    arrays = {name: data[name] for name in data.files}
 ```
 
 A Blender adapter would:

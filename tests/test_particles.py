@@ -154,3 +154,24 @@ def test_particle_copies_and_protects_initial_state() -> None:
     assert np.array_equal(particle.velocity, [3.0, 4.0])
     assert not particle.position.flags.writeable
     assert not particle.velocity.flags.writeable
+
+
+def test_transverse_layout_rejects_inconsistent_width() -> None:
+    with pytest.raises(ValueError, match="half_width_m"):
+        transverse_particles(
+            center=CENTER, count=5, spacing_m=1.0e6,
+            half_width_m=1.0e6, common_velocity=VELOCITY,
+        )
+
+
+def test_particle_generators_require_integer_counts() -> None:
+    with pytest.raises(ValueError, match="integer"):
+        radial_particles(
+            center=CENTER, count=2.5, spacing_m=1.0,
+            inner_radius_m=1.0, common_velocity=VELOCITY,
+        )
+    with pytest.raises(ValueError, match="integer"):
+        grid_particles(
+            center=CENTER, nx=3, ny=2.5,
+            spacing_m=1.0, common_velocity=VELOCITY,
+        )

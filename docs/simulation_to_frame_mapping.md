@@ -57,7 +57,8 @@ corresponding physical simulation times.
   ``duration_s * fps`` is not an integer, the last frame lands slightly before
   the boundary.
 * **Hold frames** (after the active range) freeze at the last active frame's
-  simulation time and do not advance simulation time.
+  simulation time and do not advance simulation time. Use
+  `mapping.all_sim_times_s` to obtain the entire active + hold timeline.
 
 This convention makes adjacent scenes continuous: if scene B's
 ``start_sim_time_s`` equals scene A's ``end_sim_time_s``, scene B's frame 0
@@ -92,6 +93,12 @@ Note that with 150 frames at 30 FPS over 5 seconds, the final active frame
 boundary. This is expected: the boundary defines the scene extent, while the
 fixed-rate frame grid determines the actual sample times.
 
+### Existing presentation scenes
+
+Use `PlaybackSpec.from_scene(scene, fps)` when a `SceneTimeline` already exists.
+For simulation-linked scenes, it rejects disagreement between the configured
+playback speed and `(end_sim_time_s - start_sim_time_s) / duration_s`.
+
 ## 3. Sample particle positions at frame times
 
 Use `core.playback.sample_particle_positions` to get particle positions at the
@@ -102,7 +109,7 @@ import numpy as np
 from core.playback import sample_particle_positions
 
 # Sim times for each frame (from build_frame_mapping).
-sim_times = mapping.sim_times_s  # shape (150,)
+sim_times = mapping.all_sim_times_s  # active frames plus optional holds
 
 positions, validity = sample_particle_positions(
     ds,
@@ -125,8 +132,9 @@ positions, validity = sample_particle_positions(
 
 ## 4. Data the future Blender importer will consume
 
-The Blender importer (future work) will read the same `.meta.json` + `.data.npz`
-files using only `json` and `numpy` — no SciPy, Matplotlib, or Pillow needed:
+The Blender importer (future work) can read the same `.meta.json` + `.data.npz`
+files using `json` and `numpy` — no SciPy, Matplotlib, or Pillow needed.
+The playback and dataset modules also avoid runtime imports of SciPy:
 
 ```python
 import json
