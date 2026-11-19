@@ -73,18 +73,23 @@ def reference_trajectory(
 
 
 def radial_extent(result: TrajectoryResult) -> np.ndarray:
-    """Maximum distance from the black hole among valid particles, shape ``(T,)``.
+    """Full cloud width along the local radial direction, in metres.
 
-    Times with no valid particles are NaN.
+    The direction points from the black hole toward the centre of the
+    remaining valid particles. A single particle has zero extent.
     """
-    timestamps = result.timestamps
-    extents = np.full(timestamps.size, np.nan, dtype=np.float64)
-    for t in range(timestamps.size):
+    extents = np.full(result.timestamps.size, np.nan, dtype=np.float64)
+    for t in range(result.timestamps.size):
         positions, _ = _valid_positions_at(result, t)
         if positions.size == 0:
             continue
-        distances = np.linalg.norm(positions - result.black_hole.position, axis=1)
-        extents[t] = float(np.max(distances))
+        centre = np.mean(positions, axis=0)
+        radial = centre - result.black_hole.position
+        radius = float(np.linalg.norm(radial))
+        if radius == 0.0:
+            continue
+        projections = (positions - centre) @ (radial / radius)
+        extents[t] = float(np.ptp(projections))
     return extents
 
 

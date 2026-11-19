@@ -68,7 +68,7 @@ def test_cloud_centres_over_time_shape() -> None:
     centres = cloud_centres_over_time(result)
     assert centres.shape == (3, 2)
     assert np.all(np.isfinite(centres[0]))
-    assert np.all(np.isnan(centres[2, 1]) is False or True)  # p0 valid at t=2
+    assert centres[2] == pytest.approx([0.9e8, 0.0])
 
 
 def test_reference_trajectory() -> None:
@@ -86,11 +86,13 @@ def test_radial_extent() -> None:
     result = _make_result()
     extents = radial_extent(result)
     assert extents.shape == (3,)
-    # At t=0, farthest particle is at distance ~1.01e8 (p1).
-    assert extents[0] > 1.0e8
-    assert extents[0] == pytest.approx(
-        np.max(np.linalg.norm(result.positions[0] - BH.position, axis=1))
-    )
+    # Radial width is the difference between extreme projections, not distance to BH.
+    centre = np.mean(result.positions[0], axis=0)
+    radial = centre - BH.position
+    radial /= np.linalg.norm(radial)
+    projections = (result.positions[0] - centre) @ radial
+    assert extents[0] == pytest.approx(np.ptp(projections))
+    assert extents[2] == pytest.approx(0.0)
 
 
 def test_transverse_extent() -> None:

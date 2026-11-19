@@ -279,3 +279,21 @@ def test_example_dataset_on_disk_matches_rebuild() -> None:
     for name in rebuilt.arrays:
         assert np.array_equal(loaded.arrays[name], rebuilt.arrays[name])
     assert loaded.metadata["simulation_id"] == rebuilt.metadata["simulation_id"]
+
+
+def test_exact_tidal_rejects_nonfinite_or_nonpositive_parameters() -> None:
+    for params in (
+        TidalParameters(-1.0, 10.0, 20.0),
+        TidalParameters(float("nan"), 10.0, 20.0),
+        TidalParameters(1.0, -10.0, 20.0),
+        TidalParameters(1.0, 10.0, float("inf")),
+    ):
+        with pytest.raises(ValueError):
+            tidal_difference_exact(params)
+
+
+def test_radial_acceleration_rejects_infinity() -> None:
+    with pytest.raises(ValueError):
+        radial_acceleration(float("inf"), 1.0)
+    with pytest.raises(ValueError):
+        radial_acceleration(1.0, float("nan"))

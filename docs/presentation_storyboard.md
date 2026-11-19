@@ -26,7 +26,7 @@ Classification labels used throughout this project:
 | S8 | C | Have astronomers observed tidal disruption? | Present real evidence: Shoemaker–Levy 9 and stellar tidal disruption events. | None (OBSERVED content) | Annotated scientific images or data; no expensive simulation required. | 90 s | Distinguish observations from reconstructions; no claim of direct imaging of spaghettification. | Crossfade to comparison. | Medium |
 | S9 | D | How are Earth's tides and spaghettification related? | Reinforce the common physical principle across scales. | Same differential-gravity principle (Δa ≈ 2GML/r³) | Return to simplified tidal-acceleration diagram; connect Earth–Moon with black-hole tidal physics. | 60 s | Simplified diagram; omits real-world complexity of coastal tides. | Fade out. | High |
 
-**Total scene time:** ~12 min 0 s (690 s), within the 10–15 minute limit.
+**Total scene time:** 10 min 30 s (630 s), within the 10–15 minute limit. Allow additional time for speaker pauses or questions.
 
 ## Scientific limitations (presentation-wide)
 

@@ -142,3 +142,15 @@ def test_common_velocity_applied_to_all() -> None:
         common_velocity=velocity,
     )
     assert np.all(cloud.velocities == velocity)
+
+
+def test_particle_copies_and_protects_initial_state() -> None:
+    position = np.array([1.0, 2.0])
+    velocity = np.array([3.0, 4.0])
+    particle = Particle("sample", position, velocity)
+    position[0] = 99.0
+    velocity[1] = 99.0
+    assert np.array_equal(particle.position, [1.0, 2.0])
+    assert np.array_equal(particle.velocity, [3.0, 4.0])
+    assert not particle.position.flags.writeable
+    assert not particle.velocity.flags.writeable

@@ -122,3 +122,11 @@ def test_rejects_singularity_position() -> None:
     bh = _bh()
     with pytest.raises(ValueError):
         bh.gravitational_acceleration(bh.position.copy())
+
+
+def test_position_is_not_mutated_through_constructor_input() -> None:
+    original = np.array([1.0e6, 2.0e6])
+    bh = _bh(position=original)
+    original[0] = 99.0
+    assert bh.position[0] == pytest.approx(1.0e6)
+    assert not bh.position.flags.writeable

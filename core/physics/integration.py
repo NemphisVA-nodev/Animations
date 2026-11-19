@@ -63,6 +63,9 @@ class TrajectoryResult:
     black_hole: BlackHole
     solver_success: bool
     solver_message: str
+    solver_method: str = _DEFAULT_METHOD
+    solver_rtol: float = 1e-9
+    solver_atol: float = 1e-12
 
 
 def _make_rhs(black_hole: BlackHole):
@@ -127,14 +130,22 @@ def integrate_particles(
     TrajectoryResult
         Structured integration result.
     """
-    if duration_s <= 0.0:
+    if not np.isfinite(duration_s) or duration_s <= 0.0:
         raise ValueError("duration_s must be positive")
-    if num_steps < 2:
+    if not isinstance(num_steps, (int, np.integer)) or isinstance(num_steps, (bool, np.bool_)) or num_steps < 2:
         raise ValueError("num_steps must be at least 2")
     if not np.isfinite(rtol) or rtol <= 0.0:
         raise ValueError("rtol must be a positive finite value")
     if not np.isfinite(atol) or atol <= 0.0:
         raise ValueError("atol must be a positive finite value")
+
+    if cloud.count == 0:
+        raise ValueError("particle cloud must not be empty")
+    for particle in cloud.particles:
+        if black_hole.distance(particle.position) <= black_hole.cutoff_radius_m:
+            raise ValueError(
+                f"particle {particle.id!r} starts at or inside the cutoff radius"
+            )
 
     timestamps = np.linspace(0.0, duration_s, num_steps)
     count = cloud.count
@@ -173,6 +184,10 @@ def integrate_particles(
             atol=atol,
         )
 
+        if not sol.success or sol.status not in (0, 1) or sol.sol is None:
+            raise RuntimeError(
+                f"integration failed for particle {particle.id!r}: {sol.message}"
+            )
         statuses.append(int(sol.status))
         messages.append(str(sol.message))
 
@@ -210,4 +225,7 @@ def integrate_particles(
         black_hole=black_hole,
         solver_success=solver_success,
         solver_message=solver_message,
+        solver_method=method,
+        solver_rtol=rtol,
+        solver_atol=atol,
     )

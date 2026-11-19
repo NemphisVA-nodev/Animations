@@ -11,8 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-
-GRAVITATIONAL_CONSTANT = 6.67430e-11  # m^3 kg^-1 s^-2 (CODATA 2022)
+from scipy.constants import G as GRAVITATIONAL_CONSTANT
 
 
 @dataclass(frozen=True)
@@ -25,6 +24,15 @@ class TidalParameters:
     attracting_mass_kg: float
     object_length_m: float
     center_distance_m: float
+
+
+def _validate_params(params: TidalParameters) -> None:
+    if not np.isfinite(params.attracting_mass_kg) or params.attracting_mass_kg <= 0:
+        raise ValueError("attracting mass must be positive and finite")
+    if not np.isfinite(params.object_length_m) or params.object_length_m <= 0:
+        raise ValueError("object length must be positive and finite")
+    if not np.isfinite(params.center_distance_m) or params.center_distance_m <= 0:
+        raise ValueError("center distance must be positive and finite")
 
 
 def radial_acceleration(mass_kg: float, distance_m: float) -> float:
@@ -42,9 +50,9 @@ def radial_acceleration(mass_kg: float, distance_m: float) -> float:
     float
         Acceleration magnitude in m/s^2 directed toward the mass.
     """
-    if mass_kg <= 0.0:
+    if not np.isfinite(mass_kg) or mass_kg <= 0.0:
         raise ValueError("attracting mass must be positive")
-    if distance_m <= 0.0:
+    if not np.isfinite(distance_m) or distance_m <= 0.0:
         raise ValueError("distance must be positive")
     return float(GRAVITATIONAL_CONSTANT * mass_kg / distance_m**2)
 
@@ -73,6 +81,7 @@ def tidal_difference_exact(params: TidalParameters) -> float:
         If the centre distance does not exceed half the object length (the
         near end would reach or cross the mass centre).
     """
+    _validate_params(params)
     half = params.object_length_m / 2.0
     if params.center_distance_m <= half:
         raise ValueError(
@@ -103,12 +112,7 @@ def tidal_difference_approximate(params: TidalParameters) -> float:
     float
         Approximate tidal acceleration in m/s^2.
     """
-    if params.attracting_mass_kg <= 0.0:
-        raise ValueError("attracting mass must be positive")
-    if params.object_length_m <= 0.0:
-        raise ValueError("object length must be positive")
-    if params.center_distance_m <= 0.0:
-        raise ValueError("distance must be positive")
+    _validate_params(params)
     return float(
         2.0
         * GRAVITATIONAL_CONSTANT
@@ -152,7 +156,10 @@ def particle_positions(
     tuple of np.ndarray
         (centre, near, far) positions in metres.
     """
+    _validate_params(params)
     half = params.object_length_m / 2.0
+    if params.center_distance_m <= half:
+        raise ValueError("near end must remain outside the mass centre")
     centre = np.array([params.center_distance_m], dtype=np.float64)
     near = np.array([params.center_distance_m - half], dtype=np.float64)
     far = np.array([params.center_distance_m + half], dtype=np.float64)
