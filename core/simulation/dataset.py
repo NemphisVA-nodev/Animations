@@ -162,6 +162,8 @@ def validate_dataset(dataset: SimulationDataset) -> None:
         raise ValueError("arrays must be a dictionary")
 
     nonfinite_policy = metadata.get(NONFINITE_POLICY_KEY)
+    if nonfinite_policy not in (None, NONFINITE_POLICY_MASKED):
+        raise ValueError(f"unsupported nonfinite policy: {nonfinite_policy!r}")
     masked = nonfinite_policy == NONFINITE_POLICY_MASKED
 
     # Trajectory consistency: validity_mask and particle_ids must be present
@@ -171,6 +173,10 @@ def validate_dataset(dataset: SimulationDataset) -> None:
         name in TRAJECTORY_ARRAYS and arrays[name].ndim == 3 for name in arrays
     )
     if has_trajectory:
+        if not masked:
+            raise ValueError("3-D trajectories require the masked nonfinite policy")
+        if "timestamps" not in arrays:
+            raise ValueError("trajectory arrays require timestamps")
         if VALIDITY_MASK_ARRAY not in arrays:
             raise ValueError(
                 f"trajectory arrays require {VALIDITY_MASK_ARRAY!r}"
@@ -199,6 +205,8 @@ def validate_dataset(dataset: SimulationDataset) -> None:
                     f"array {name!r} must be one-dimensional, got {value.ndim}D"
                 )
         elif name == VALIDITY_MASK_ARRAY:
+            if value.dtype.kind != "b":
+                raise ValueError("validity_mask must have boolean dtype")
             if value.ndim != 2:
                 raise ValueError(
                     f"array {name!r} must be two-dimensional, got {value.ndim}D"
@@ -258,7 +266,7 @@ def validate_dataset(dataset: SimulationDataset) -> None:
                 raise ValueError(
                     f"array {name!r} must be one-dimensional, got {value.ndim}D"
                 )
-            if value.dtype.kind not in ("U", "S", "O"):
+            if value.dtype.kind not in ("U", "S"):
                 raise ValueError(f"array {name!r} must be a string array")
             # String identifiers have length N, not T; exclude from the
             # shared-length check (validated separately above).
@@ -399,7 +407,9 @@ def trajectory_to_dataset(
             "black_hole_mass_kg": black_hole.mass_kg,
             "schwarzschild_radius_m": black_hole.schwarzschild_radius_m,
             "integration_cutoff_radius_m": black_hole.cutoff_radius_m,
-            "numerical_method": "DOP853",
+            "numerical_method": result.solver_method,
+            "solver_rtol": result.solver_rtol,
+            "solver_atol": result.solver_atol,
             "solver_success": bool(result.solver_success),
             "solver_message": str(result.solver_message),
             "termination_times_s": result.termination_times,
@@ -474,7 +484,11 @@ def load_dataset(path: str | Path) -> SimulationDataset:
     path = Path(path)
     if path.suffix == ".npz":
         data_path = path
-        meta_path = path.with_suffix(".meta.json")
+        if path.stem.endswith(".data"):
+            meta_stem = path.stem[:-len(".data")]
+        else:
+            meta_stem = path.stem
+        meta_path = path.with_name(meta_stem + ".meta.json")
     elif path.suffix == ".json":
         meta_path = path
         if path.stem.endswith(".meta"):
@@ -494,7 +508,7 @@ def load_dataset(path: str | Path) -> SimulationDataset:
     with open(meta_path, "r", encoding="utf-8") as handle:
         metadata = json.load(handle)
 
-    with np.load(data_path) as archive:
+    with np.load(data_path, allow_pickle=False) as archive:
         arrays = {name: archive[name] for name in archive.files}
 
     dataset = SimulationDataset(metadata=metadata, arrays=arrays)
