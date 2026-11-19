@@ -161,6 +161,14 @@ def test_save_load_roundtrip_preserves_precision(tmp_path: Path) -> None:
     assert loaded.metadata["schema_version"] == SCHEMA_VERSION
 
 
+def test_save_dataset_creates_nested_output_directory(tmp_path: Path) -> None:
+    dataset = _base_dataset(tmp_path)
+    stem = tmp_path / "new" / "nested" / "sample"
+    meta_path, data_path = save_dataset(dataset, stem)
+    assert meta_path.is_file()
+    assert data_path.is_file()
+
+
 def test_load_dataset_from_npz_path(tmp_path: Path) -> None:
     from core.simulation.dataset import load_dataset
 

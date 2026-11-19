@@ -484,6 +484,8 @@ def save_dataset(
     }
     metadata["created_at"] = datetime.now(timezone.utc).isoformat()
 
+    # Output stems may point into a new, nested directory.
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
     with open(meta_path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2, sort_keys=True, allow_nan=False)
 

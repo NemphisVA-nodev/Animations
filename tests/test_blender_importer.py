@@ -5,8 +5,8 @@ They cover coordinate transformation, frame indexing, sampled positions,
 validity handling, hold frames, scale validation, stable particle IDs,
 velocity preservation, dataset reconstruction, and import repeatability.
 
-Tests that need ``bpy`` live in ``tests/test_blender_importer_bpy.py`` and are
-intended to be run inside Blender, not here.
+The Blender-specific smoke test lives in
+``blender/tests/test_blender_integration.py`` and runs inside Blender.
 """
 
 from __future__ import annotations
@@ -52,7 +52,8 @@ def _make_trajectory_dataset(
 ) -> Path:
     """Build and save a small deterministic trajectory dataset.
 
-    Particles move linearly: position = [t * (p+1), t * 0.5]. One particle
+    Particles move linearly: position = [t * (p+1), t * 0.5] with nonzero
+    velocities. One particle
     may be terminated at ``termination_time``.
     """
     timestamps = np.linspace(0.0, duration_s, n_times).astype(np.float64)
@@ -62,8 +63,9 @@ def _make_trajectory_dataset(
 
     for t in range(n_times):
         for p in range(n_particles):
-            positions[t, p, 0] = float(t) * (p + 1)
-            positions[t, p, 1] = float(t) * 0.5
+            positions[t, p, 0] = timestamps[t] * (p + 1)
+            positions[t, p, 1] = timestamps[t] * 0.5
+            velocities[t, p] = (float(p + 1), 0.5)
 
     if termination_time is not None:
         term_idx = int(np.searchsorted(timestamps, termination_time, side="right"))
@@ -255,14 +257,14 @@ def test_sample_at_valid_times_returns_expected_positions(tmp_path: Path) -> Non
 def test_sample_between_samples_interpolates(tmp_path: Path) -> None:
     stem = _make_trajectory_dataset(tmp_path, n_times=9, n_particles=1)
     dataset = load_dataset(stem)
-    # At t=1.0, halfway between t=0 ([0,0]) and t=2 ([2,1]).
+    # At t=1.5, halfway between actual samples at t=1 and t=2.
     positions, validity = sample_particle_positions(
         dataset,
         particle_ids=["p000"],
-        sim_times=np.array([1.0]),
+        sim_times=np.array([1.5]),
     )
     assert validity[0, 0]
-    assert positions[0, 0] == pytest.approx([1.0, 0.5])
+    assert positions[0, 0] == pytest.approx([1.5, 0.75])
 
 
 def test_terminated_particle_invalid_after_cutoff(tmp_path: Path) -> None:
@@ -383,6 +385,9 @@ def test_velocities_preserved_for_valid_samples(tmp_path: Path) -> None:
     # All samples are valid in this dataset; velocities should be finite.
     assert np.all(np.isfinite(data.velocities))
 
+    # Nonzero values ensure a regression to zeros cannot pass this test.
+    assert np.any(data.velocities != 0.0)
+
     # Velocities should match the original dataset exactly.
     dataset = load_dataset(stem)
     assert np.array_equal(data.velocities, dataset.arrays["velocities"])
@@ -427,7 +432,9 @@ def test_trajectory_data_includes_velocities_field(tmp_path: Path) -> None:
 
 def test_reconstruct_simulation_dataset_from_trajectory_data(tmp_path: Path) -> None:
     """_as_simulation_dataset must produce a dataset that passes validation."""
-    stem = _make_trajectory_dataset(tmp_path, n_times=6, n_particles=2)
+    stem = _make_trajectory_dataset(
+        tmp_path, n_times=6, n_particles=2, termination_time=4.0
+    )
     from blender.importer import load_trajectory
     from blender.animator import Animator
     from core.playback import PlaybackSpec
@@ -459,14 +466,14 @@ def test_reconstruct_simulation_dataset_from_trajectory_data(tmp_path: Path) -> 
 
     # Velocities must be preserved (not zeros).
     assert np.array_equal(
-        reconstructed.arrays["velocities"], data.velocities
+        reconstructed.arrays["velocities"], data.velocities, equal_nan=True
     )
 
-    # NaN positions must stay NaN.
-    assert np.array_equal(
-        reconstructed.arrays["positions"][~reconstructed.arrays["validity_mask"]],
-        data.positions[~data.validity_mask],
-    )
+    # Invalid samples must actually exist and keep NaN values in both arrays.
+    invalid = ~reconstructed.arrays["validity_mask"]
+    assert invalid.any()
+    assert np.all(np.isnan(reconstructed.arrays["positions"][invalid]))
+    assert np.all(np.isnan(reconstructed.arrays["velocities"][invalid]))
 
 
 # ---------------------------------------------------------------------------
