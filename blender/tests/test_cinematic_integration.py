@@ -17,8 +17,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import bpy
+try:  # Allow ordinary pytest to import the module without Blender installed.
+    import bpy
+except ImportError:
+    bpy = None
 
+from blender.animator import require_bpy
 from blender.cinematic_paths import trail_reveal_windows
 from blender.cinematic_scene import build_cinematic_scene, VISUAL_COLLECTION
 from blender.importer import metres_to_blender
@@ -35,6 +39,7 @@ def run_cinematic_test(
     trail_frames: int,
     output: str | Path,
 ) -> None:
+    require_bpy()
     dataset = load_dataset(dataset_path)
     objects = build_cinematic_scene(
         dataset_path, fps=fps, scale=scale, trail_frames=trail_frames
