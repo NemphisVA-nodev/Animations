@@ -199,6 +199,17 @@ def validate_dataset(dataset: SimulationDataset) -> None:
             raise ValueError("validity_mask must be a boolean NumPy array")
         if mask.ndim != 2:
             raise ValueError("validity_mask must be two-dimensional")
+        # Reject validity histories that allow a terminated particle to
+        # reactivate: each particle column must be a contiguous valid prefix
+        # (once False, stays False).
+        if mask.shape[0] > 1 and mask.shape[1] > 0:
+            transitions = np.diff(mask.astype(np.int8), axis=0)
+            if np.any(transitions < 0) and np.any(transitions > 0):
+                raise ValueError(
+                    "validity_mask must not allow a terminated particle to "
+                    "reactivate (each particle column must be a contiguous "
+                    "valid prefix)"
+                )
 
     lengths: list[int] = []
     for name, value in arrays.items():
