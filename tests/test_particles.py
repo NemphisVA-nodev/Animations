@@ -33,6 +33,12 @@ def test_particle_stores_fields() -> None:
     assert p.velocity.shape == (2,)
 
 
+@pytest.mark.parametrize("particle_id", ["", "   ", None, 3])
+def test_particle_rejects_invalid_id(particle_id) -> None:
+    with pytest.raises(ValueError, match="particle id"):
+        _make_particle(particle_id)
+
+
 def test_particle_rejects_bad_shape() -> None:
     with pytest.raises(ValueError):
         Particle(id="p", position=np.array([1.0, 2.0, 3.0]), velocity=np.array([0.0, 0.0]))

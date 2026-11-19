@@ -181,7 +181,7 @@ Scenario A also accepts ``--spacing``; Scenario B accepts ``--nx``, ``--ny``,
 Both produce `<stem>.meta.json` and `<stem>.data.npz` in the `outputs/`
 directory (gitignored generated data).
 
-## Consumption by a future Blender adapter
+## Blender preview integration (Step 5B)
 
 The exported files require only the Python standard library and NumPy to read,
 so Blender's bundled Python can load them without installing the full
@@ -198,14 +198,16 @@ with np.load(stem.with_name(stem.name + ".data.npz"), allow_pickle=False) as dat
     arrays = {name: data[name] for name in data.files}
 ```
 
-A Blender adapter would:
+The current technical preview in `blender/`:
 
-1. Load `positions` (``(T, N, 2)`` m), `velocities`, and `validity_mask`.
-2. Apply a visual coordinate transform (scale metres to scene units, re-centre
-   on the falling object, map axes to Blender's Z-up convention).
-3. Use `validity_mask` to hide particles after termination.
-4. Drive camera motion via the timeline/transition specification
-   (`docs/transition_architecture.md`).
+1. Loads and validates `positions`, `velocities` and `validity_mask`.
+2. Maps 2-D simulation coordinates into Blender's XY plane (Z = 0) using a
+   constant visual scale, without changing the source SI values.
+3. Samples physical trajectories at fixed presentation frame times.
+4. Hides terminated particles using the validity mask and sets the scene FPS.
+
+Cinematic camera movement and integration with the transition specification
+(`docs/transition_architecture.md`) are **future work**, not part of Step 5B.
 
 Original SI values are retained as the source of truth; the transform is
 purely visual.

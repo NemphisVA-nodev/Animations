@@ -12,7 +12,7 @@ Responsibilities
 * Hide particles (viewport + render) when the validity mask is False and keep
   them hidden for all remaining frames, including hold frames.
 * Add a central black-hole marker at the simulated origin.
-* Build an orthographic camera facing the XY simulation plane.
+* Set Blender scene timing to match the requested FPS and frame range.
 * Apply a constant metres-to-blender-units scale.
 
 Blender never simulates gravity here; it only visualizes precomputed data.
@@ -116,14 +116,28 @@ class Animator:
         return collection
 
     def _remove_preview_objects(self) -> None:
-        """Remove previously created preview objects to avoid duplicates."""
+        """Clear the dedicated preview collection, including stale particle IDs."""
         collection = self._preview_collection()
-        owned = {self.bh_marker_name} | set(self.data.particle_ids)
         for obj in list(collection.objects):
-            if obj.name in owned:
-                for coll in list(obj.users_collection):
-                    coll.objects.unlink(obj)
-                bpy.data.objects.remove(obj, do_unlink=True)
+            mesh = obj.data if obj.type == "MESH" else None
+            materials = list(mesh.materials) if mesh is not None else []
+            bpy.data.objects.remove(obj, do_unlink=True)
+            if mesh is not None and mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
+            for material in materials:
+                if material is not None and material.users == 0:
+                    bpy.data.materials.remove(material)
+
+    @staticmethod
+    def _link_to_preview_collection(
+        obj: bpy.types.Object, collection: bpy.types.Collection
+    ) -> None:
+        """Keep generated objects in the preview collection only."""
+        if collection not in obj.users_collection:
+            collection.objects.link(obj)
+        for other in list(obj.users_collection):
+            if other != collection:
+                other.objects.unlink(obj)
 
     @staticmethod
     def _new_material(name: str, color: tuple[float, float, float, float]) -> bpy.types.Material:
@@ -174,7 +188,7 @@ class Animator:
         # Black-hole marker at the simulated origin (visual, not to scale).
         bh_obj = self._create_bh_marker()
         bh_obj.location = (0.0, 0.0, 0.0)
-        collection.objects.link(bh_obj)
+        self._link_to_preview_collection(bh_obj, collection)
 
         # Blender frame mapping: Python frame index i -> Blender frame i + 1.
         mapping = build_frame_mapping(self.spec)
@@ -184,7 +198,11 @@ class Animator:
         scene = bpy.context.scene
         scene.frame_start = 1
         scene.frame_end = mapping.total_frames
-
+        # Blender stores the nominal FPS as an integer and uses fps_base
+        # for fractional rates such as 23.976.
+        nominal_fps = max(1, round(self.spec.fps))
+        scene.render.fps = nominal_fps
+        scene.render.fps_base = nominal_fps / self.spec.fps
 
         # Rebuild a minimal SimulationDataset for the sampler.
         dataset = self._as_simulation_dataset()
@@ -209,7 +227,7 @@ class Animator:
         for output_index, particle_id in enumerate(self.data.particle_ids):
             color = base_colors[output_index % len(base_colors)]
             obj = self._create_particle_object(particle_id, color)
-            collection.objects.link(obj)
+            self._link_to_preview_collection(obj, collection)
             created[particle_id] = obj
 
             n_frames = frame_positions.shape[0]
@@ -229,7 +247,6 @@ class Animator:
 
                 obj.keyframe_insert(data_path="hide_viewport", frame=blender_frame)
                 obj.keyframe_insert(data_path="hide_render", frame=blender_frame)
-
 
             # Blender 5.x: use layered Actions for interpolation.
             # Location keyframes use LINEAR; visibility keyframes use CONSTANT
@@ -262,7 +279,8 @@ class Animator:
                     f"{particle_id!r}; interpolation was not applied"
                 )
 
-
+        # Show the first physical sample when the scene is opened.
+        scene.frame_set(scene.frame_start)
         return created
 
     # ------------------------------------------------------------------
@@ -326,19 +344,17 @@ def animate_trajectory_file(
         Name of the black-hole marker object.
     """
     require_bpy()
-    from core.simulation.dataset import load_dataset
-
-    dataset = load_dataset(path)
-    if end_sim_time_s is None:
-        end_sim_time_s = float(dataset.arrays["timestamps"][-1])
-
     from blender.importer import load_trajectory
 
+    # load_trajectory already validates and loads the complete dataset.
+    # Avoid opening and validating the same NPZ archive twice.
     data = load_trajectory(path, scale=scale)
+    if end_sim_time_s is None:
+        end_sim_time_s = float(data.timestamps[-1])
 
     spec = PlaybackSpec(
-        scene_id=str(dataset.metadata.get("simulation_id", "preview")),
-        simulation_id=dataset.metadata.get("simulation_id"),
+        scene_id=str(data.metadata.get("simulation_id", "preview")),
+        simulation_id=data.metadata.get("simulation_id"),
         fps=fps,
         duration_s=duration_s,
         start_sim_time_s=start_sim_time_s,

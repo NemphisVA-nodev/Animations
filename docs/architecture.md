@@ -69,7 +69,8 @@ The physics engine is partially implemented: Newtonian tidal acceleration
 (`core/physics/black_hole.py`), test-particle clouds
 (`core/physics/particles.py`), numerical integration with event-based cutoff
 (`core/physics/integration.py`), and tidal measurements
-(`core.physics.measurements`) are implemented and tested. The rendering engine
-and exporting/FFmpeg video encoding are not yet implemented. No physics
-simulations are rendered to video yet. No claim is made that any of the
-described cinematic functionality already works.
+(`core.physics.measurements`) are implemented and tested. Step 5B also
+provides a Blender 5.3 technical preview that animates precomputed particle
+trajectories. Cinematic rendering, transition-driven camera movement and
+exporting/FFmpeg video encoding are not yet implemented. No physics
+simulations are exported to video yet.

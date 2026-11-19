@@ -100,8 +100,11 @@ from pathlib import Path
 
 def load_simulation(stem: str | Path):
     stem = Path(stem)
-    meta = json.loads((stem.with_suffix(".meta.json")).read_text())
-    with np.load(stem.with_suffix(".data.npz"), allow_pickle=False) as data:
+    # with_name preserves dotted stems such as `simulation.v1`.
+    meta_path = stem.with_name(stem.name + ".meta.json")
+    data_path = stem.with_name(stem.name + ".data.npz")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    with np.load(data_path, allow_pickle=False) as data:
         arrays = {name: data[name] for name in data.files}
     return meta, arrays
 ```

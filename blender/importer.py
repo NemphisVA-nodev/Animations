@@ -30,7 +30,6 @@ if str(REPO_ROOT) not in sys.path:
 from core.simulation.dataset import (  # noqa: E402
     SimulationDataset,
     load_dataset,
-    validate_dataset,
     VALIDITY_MASK_ARRAY,
     PARTICLE_IDS_ARRAY,
     TRAJECTORY_ARRAYS,
@@ -67,6 +66,9 @@ class TrajectoryData:
     positions:
         Particle positions in metres, shape ``(T, N, 2)``. Entries where the
         validity mask is False are NaN.
+    velocities:
+        Particle velocities in m/s, shape ``(T, N, 2)``. Invalid samples
+        remain NaN, just like positions.
     validity_mask:
         Boolean validity per particle per timestamp, shape ``(T, N)``.
     metadata:
@@ -122,9 +124,8 @@ def load_trajectory(
     if not np.isfinite(scale) or scale <= 0.0:
         raise ImportError(f"scale must be a positive finite value, got {scale!r}")
 
+    # load_dataset validates schema, units, masks and array shapes.
     dataset: SimulationDataset = load_dataset(meta_path)
-    validate_dataset(dataset)
-
     arrays = dataset.arrays
 
     for name in TRAJECTORY_ARRAYS:
@@ -166,7 +167,6 @@ def load_trajectory(
         metadata=dict(dataset.metadata),
         scale=float(scale),
     )
-
 
 
 def metres_to_blender(
