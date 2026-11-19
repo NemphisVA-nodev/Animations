@@ -1,0 +1,22 @@
+[project]
+name = "animations"
+version = "0.1.0"
+description = "Modular Python framework for scientifically accurate physics animations for educational presentations."
+readme = "README.md"
+requires-python = ">=3.15"
+authors = [
+    { name = "NemphisVA-nodev" },
+]
+keywords = ["physics", "animation", "simulation", "matplotlib", "science", "education"]
+license = { text = "MIT" }
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.5",
+    "pillow>=13.0.0",
+    "scipy>=1.18.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

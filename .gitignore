@@ -221,3 +221,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated animations and media. The outputs/ directory itself is kept
+# (with .gitkeep) but generated frames and video files are not committed.
+outputs/*
+!outputs/.gitkeep
+
+# Temporary files
+*.tmp
+*.temp
+*~
+~*
+
+# Local IDE settings
+.vscode/
+.idea/
