@@ -13,11 +13,12 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import numpy as np
 
-from ..physics.integration import TrajectoryResult
+if TYPE_CHECKING:
+    from ..physics.integration import TrajectoryResult
 
 SCHEMA_VERSION = "1.0.0"
 
@@ -199,14 +200,14 @@ def validate_dataset(dataset: SimulationDataset) -> None:
             raise ValueError("validity_mask must be a boolean NumPy array")
         if mask.ndim != 2:
             raise ValueError("validity_mask must be two-dimensional")
+        # Each particle stays invalid once it reaches the cutoff.
+        if np.any(~mask[:-1] & mask[1:]):
+            raise ValueError(
+                "validity_mask must not allow a terminated particle to reactivate"
+            )
 
     lengths: list[int] = []
     for name, value in arrays.items():
-        if not isinstance(value, np.ndarray):
-            raise ValueError(f"array {name!r} is not a NumPy array")
-        if value.size == 0:
-            raise ValueError(f"array {name!r} is empty")
-
         is_trajectory_candidate = name in TRAJECTORY_ARRAYS
         is_masked_trajectory = (
             is_trajectory_candidate and masked and value.ndim == 3
@@ -257,8 +258,8 @@ def validate_dataset(dataset: SimulationDataset) -> None:
                     f"{VALIDITY_MASK_ARRAY!r} must match the (T, N) shape of "
                     f"{name!r}"
                 )
-            if value.dtype.kind not in ("f", "c"):
-                raise ValueError(f"array {name!r} must have floating-point values")
+            if value.dtype.kind != "f":
+                raise ValueError(f"array {name!r} must have real floating-point values")
             valid_values = value[validity]
             if valid_values.size > 0 and not np.all(np.isfinite(valid_values)):
                 raise ValueError(
