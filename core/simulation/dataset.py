@@ -186,6 +186,14 @@ def validate_dataset(dataset: SimulationDataset) -> None:
                 f"trajectory arrays require {PARTICLE_IDS_ARRAY!r}"
             )
 
+    # Check the mask before using it to index trajectory arrays.
+    if has_trajectory:
+        mask = arrays[VALIDITY_MASK_ARRAY]
+        if not isinstance(mask, np.ndarray) or mask.dtype.kind != "b":
+            raise ValueError("validity_mask must be a boolean NumPy array")
+        if mask.ndim != 2:
+            raise ValueError("validity_mask must be two-dimensional")
+
     lengths: list[int] = []
     for name, value in arrays.items():
         if not isinstance(value, np.ndarray):
