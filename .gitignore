@@ -236,3 +236,17 @@ outputs/*
 # Local IDE settings
 .vscode/
 .idea/
+
+# Local AI assistant and Blender MCP settings.
+# These can contain machine-specific commands, paths or credentials.
+/.kilo/
+/.cursor/mcp.json
+/.roo/mcp.json
+/.kilocode/mcp.json
+/.mcp.json
+/mcp.json
+/mcp.local.json
+
+# Machine-specific environment overrides
+.env.*
+!.env.example
