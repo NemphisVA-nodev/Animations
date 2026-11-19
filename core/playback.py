@@ -161,15 +161,15 @@ def _trajectory_arrays(
     if n_times != times.size or n_particles == 0:
         raise ValueError("validity_mask must match timestamps and have particles")
 
+    # Once a particle reaches the cutoff, it cannot become valid again.
+    if np.any(~mask[:-1] & mask[1:]):
+        raise ValueError("validity_mask must not allow a particle to reactivate")
+
     for name, value in (("positions", positions), ("velocities", velocities)):
         if value.shape != (n_times, n_particles, 2) or value.dtype.kind != "f":
             raise ValueError(f"{name} must be a real floating-point (T, N, 2) array")
         if not np.all(np.isfinite(value[mask])) or not np.all(np.isnan(value[~mask])):
             raise ValueError(f"{name} must be finite when valid and NaN when invalid")
-
-    # Once a particle reaches the cutoff, it cannot become valid again.
-    if np.any(~mask[:-1] & mask[1:]):
-        raise ValueError("validity_mask must not allow a particle to reactivate")
 
     if ids.ndim != 1 or ids.size != n_particles or ids.dtype.kind not in ("U", "S"):
         raise ValueError("particle_ids must be a string array of length N")
