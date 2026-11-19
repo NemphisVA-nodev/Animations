@@ -151,6 +151,11 @@ def validate_dataset(dataset: SimulationDataset) -> None:
     for key, value in units.items():
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"unit for {key!r} must be a non-empty string")
+        expected = ALLOWED_UNITS.get(key)
+        if expected is not None and value != expected:
+            raise ValueError(
+                f"unit for {key!r} must be {expected!r}, got {value!r}"
+            )
 
     reference_frame = metadata.get("reference_frame", {})
     if not isinstance(reference_frame, dict) or not reference_frame:
@@ -244,6 +249,8 @@ def validate_dataset(dataset: SimulationDataset) -> None:
 
         # Finiteness rules.
         if name == "timestamps":
+            if value.dtype.kind not in ("f", "i", "u"):
+                raise ValueError("timestamps must contain real numeric values")
             if not np.all(np.isfinite(value)):
                 raise ValueError(f"array {name!r} contains non-finite values")
         elif name == PARTICLE_IDS_ARRAY:
@@ -484,6 +491,8 @@ def save_dataset(
     }
     metadata["created_at"] = datetime.now(timezone.utc).isoformat()
 
+    # Output stems may point into a new, nested directory.
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
     with open(meta_path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2, sort_keys=True, allow_nan=False)
 

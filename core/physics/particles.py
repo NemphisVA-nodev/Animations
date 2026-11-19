@@ -32,6 +32,8 @@ class Particle:
     velocity: np.ndarray
 
     def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ValueError("particle id must be a non-empty string")
         pos = np.array(self.position, dtype=np.float64, copy=True)
         vel = np.array(self.velocity, dtype=np.float64, copy=True)
         if pos.shape != (2,):

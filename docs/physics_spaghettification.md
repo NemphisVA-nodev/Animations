@@ -46,17 +46,17 @@ All calculations are Newtonian and deterministic.
 | Shoemaker–Levy 9, stellar tidal disruption events | OBSERVED | Real astronomical evidence; no fabrication. |
 | Earth–Moon tidal bulges (idealized) | SCHEMATIC / CALCULATED | Qualitative illustration of differential gravity. |
 
-## How future Blender scenes use simulation data
+## How the Blender preview uses simulation data
 
 1. Physics is computed once in Python (SI units, frame-rate independent).
 2. Results are exported as `*.meta.json` + `*.data.npz` (see
    `docs/simulation_data_format.md`), readable with only `json` + `numpy`.
-3. Blender's bundled Python loads the arrays and applies a visual
-   coordinate transform (scale, origin shift, axis mapping) for placement;
-   original SI values are retained.
-4. Camera motion and deformation are driven by the timeline/transition
-   specification (`docs/transition_architecture.md`), not by recomputing
-   physics.
+3. The current Blender adapter loads the validated arrays, converts the
+   simulation XY plane to Blender XY with Z = 0, and applies a constant scale.
+   Original SI values are retained.
+4. The preview keyframes particle positions and termination visibility.
+   Cinematic camera movement and visual deformation driven by transitions
+   (`docs/transition_architecture.md`) are planned, not yet implemented.
 
 ## Scientific accuracy versus cinematic visualization
 
