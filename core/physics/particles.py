@@ -32,8 +32,8 @@ class Particle:
     velocity: np.ndarray
 
     def __post_init__(self) -> None:
-        pos = np.asarray(self.position, dtype=np.float64)
-        vel = np.asarray(self.velocity, dtype=np.float64)
+        pos = np.array(self.position, dtype=np.float64, copy=True)
+        vel = np.array(self.velocity, dtype=np.float64, copy=True)
         if pos.shape != (2,):
             raise ValueError(f"particle {self.id!r}: position must have shape (2,)")
         if vel.shape != (2,):
@@ -42,6 +42,8 @@ class Particle:
             raise ValueError(f"particle {self.id!r}: position must contain only finite values")
         if not np.all(np.isfinite(vel)):
             raise ValueError(f"particle {self.id!r}: velocity must contain only finite values")
+        pos.setflags(write=False)
+        vel.setflags(write=False)
         object.__setattr__(self, "position", pos)
         object.__setattr__(self, "velocity", vel)
 
