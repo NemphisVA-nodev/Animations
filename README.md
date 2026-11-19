@@ -103,3 +103,11 @@ following Python-side (no Blender) foundation has been implemented and tested:
 encoding, graphical user interface, animation demos, and Blender integration.
 No physics simulations are rendered to video yet. See `docs/` for the planned
 architecture, storyboard, data format, and transition design.
+
+## Copyright and licensing
+
+Copyright © 2026 Fabian Göken. All rights reserved.
+
+This project is proprietary. No permission is granted to copy, modify, redistribute, or reuse the original source code or assets without prior written permission, except as permitted by law or GitHub's Terms of Service. See [LICENSE](LICENSE) for details.
+
+**Previous versions:** This project was previously published under the MIT License. Rights validly granted for those earlier versions are not revoked by this change. Third-party dependencies remain subject to their own licenses.
