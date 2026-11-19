@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.spatial.distance import pdist
+from scipy.constants import G
 
 from .integration import TrajectoryResult
 
@@ -158,24 +159,14 @@ def radial_tidal_acceleration(
     if not np.isfinite(object_length_m) or object_length_m <= 0.0:
         raise ValueError("object_length_m must be a positive finite value")
 
-    from .tidal import TidalParameters, tidal_difference_approximate
-
-    timestamps = result.timestamps
-    values = np.full(timestamps.size, np.nan, dtype=np.float64)
     centres = cloud_centres_over_time(result)
-    for t in range(timestamps.size):
-        centre = centres[t]
-        if np.any(np.isnan(centre)):
-            continue
-        distance = float(np.linalg.norm(centre - result.black_hole.position))
-        if distance <= object_length_m / 2.0:
-            continue
-        params = TidalParameters(
-            attracting_mass_kg=result.black_hole.mass_kg,
-            object_length_m=object_length_m,
-            center_distance_m=distance,
-        )
-        values[t] = tidal_difference_approximate(params)
+    distances = np.linalg.norm(centres - result.black_hole.position, axis=1)
+    valid = np.isfinite(distances) & (distances > object_length_m / 2.0)
+    values = np.full(result.timestamps.size, np.nan, dtype=np.float64)
+    values[valid] = (
+        2.0 * G * result.black_hole.mass_kg * object_length_m
+        / distances[valid] ** 3
+    )
     return values
 
 
