@@ -141,3 +141,25 @@ def test_tidal_rejects_bad_length() -> None:
         radial_tidal_acceleration(result, object_length_m=0.0)
     with pytest.raises(ValueError):
         transverse_tidal_acceleration(result, object_length_m=-1.0)
+
+
+def test_pairwise_separation_matches_manual_distances() -> None:
+    result = _make_result()
+    points = result.positions[0]
+    expected = np.mean([
+        np.linalg.norm(points[0] - points[1]),
+        np.linalg.norm(points[0] - points[2]),
+        np.linalg.norm(points[1] - points[2]),
+    ])
+    assert mean_pairwise_separation(result)[0] == pytest.approx(expected)
+
+
+def test_tidal_estimate_matches_newtonian_formula() -> None:
+    from scipy.constants import G
+
+    result = _make_result()
+    length = 1.0e6
+    centre = geometric_center(result, 0)
+    distance = np.linalg.norm(centre - BH.position)
+    expected = 2 * G * BH.mass_kg * length / distance**3
+    assert radial_tidal_acceleration(result, length)[0] == pytest.approx(expected)
