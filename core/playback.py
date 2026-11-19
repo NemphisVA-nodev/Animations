@@ -14,6 +14,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from core.simulation.dataset import SimulationDataset
+    from core.timeline import SceneTimeline
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,29 @@ class PlaybackSpec:
             raise ValueError("end_sim_time_s must be >= start_sim_time_s")
         if self.hold_s < 0:
             raise ValueError("hold_s must be non-negative")
+
+    @classmethod
+    def from_scene(cls, scene: SceneTimeline, fps: float) -> PlaybackSpec:
+        """Adapt an existing presentation scene without ignoring its speed."""
+        if scene.simulation_id is not None:
+            speed = (
+                (scene.end_sim_time_s - scene.start_sim_time_s) / scene.duration_s
+            )
+            if not np.isclose(speed, scene.playback_speed, rtol=1e-9, atol=1e-12):
+                raise ValueError(
+                    f"scene {scene.scene_id!r}: playback_speed does not match "
+                    "the simulation window and presentation duration"
+                )
+
+        return cls(
+            scene_id=scene.scene_id,
+            simulation_id=scene.simulation_id,
+            fps=fps,
+            duration_s=scene.duration_s,
+            start_sim_time_s=scene.start_sim_time_s,
+            end_sim_time_s=scene.end_sim_time_s,
+            hold_s=scene.hold_s,
+        )
 
 
 @dataclass(frozen=True)
