@@ -100,8 +100,8 @@ def _as_vector(value: np.ndarray, name: str) -> np.ndarray:
 
 
 def _validate_count(count: int) -> None:
-    if count < 1:
-        raise ValueError("count must be at least 1")
+    if isinstance(count, bool) or not isinstance(count, (int, np.integer)) or count < 1:
+        raise ValueError("count must be a positive integer")
 
 
 def _validate_spacing(spacing_m: float) -> None:
@@ -157,6 +157,8 @@ def transverse_particles(
     _validate_spacing(spacing_m)
     if not np.isfinite(half_width_m) or half_width_m < 0.0:
         raise ValueError("half_width_m must be a non-negative finite value")
+    if not np.isclose(2.0 * half_width_m, (count - 1) * spacing_m):
+        raise ValueError("half_width_m must match count and spacing_m")
 
     center_arr = _as_vector(center, "center")
     velocity = _as_vector(common_velocity, "common_velocity")
@@ -184,8 +186,8 @@ def grid_particles(
     ``nx`` columns span x and ``ny`` rows span y, centred so the grid's
     geometric centre coincides with ``center``.
     """
-    if nx < 1 or ny < 1:
-        raise ValueError("nx and ny must be at least 1")
+    _validate_count(nx)
+    _validate_count(ny)
     _validate_spacing(spacing_m)
 
     center_arr = _as_vector(center, "center")
