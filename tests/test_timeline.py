@@ -112,3 +112,21 @@ def test_scene_reuse_across_presentations() -> None:
     )
     assert tl_a.scene_ids() == ["shared"]
     assert tl_b.scene_ids() == ["shared"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("duration_s", float("nan")),
+    ("start_sim_time_s", float("inf")),
+    ("end_sim_time_s", float("nan")),
+    ("playback_speed", float("inf")),
+    ("hold_s", float("nan")),
+])
+def test_scene_rejects_nonfinite_timing(field, value) -> None:
+    values = {
+        "scene_id": "s1", "simulation_id": "a", "duration_s": 2.0,
+        "start_sim_time_s": 0.0, "end_sim_time_s": 2.0,
+        "playback_speed": 1.0, "entry_anchor": "in", "exit_anchor": "out",
+    }
+    values[field] = value
+    with pytest.raises(ValueError, match="finite"):
+        SceneTimeline(**values)
