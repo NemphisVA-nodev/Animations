@@ -862,3 +862,29 @@ import core.simulation.dataset
         cwd=Path(__file__).resolve().parents[1],
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_scene_timeline_adapter_preserves_timing() -> None:
+    from core.timeline import SceneTimeline
+
+    scene = SceneTimeline(
+        scene_id="infall", simulation_id="sim", duration_s=5.0,
+        start_sim_time_s=0.0, end_sim_time_s=10.0, playback_speed=2.0,
+        entry_anchor="start", exit_anchor="finish", hold_s=1.0,
+    )
+    mapping = build_frame_mapping(PlaybackSpec.from_scene(scene, fps=30))
+    assert mapping.num_frames == 150
+    assert mapping.hold_frames == 30
+    assert mapping.effective_playback_speed == pytest.approx(2.0)
+
+
+def test_scene_timeline_adapter_rejects_conflicting_speed() -> None:
+    from core.timeline import SceneTimeline
+
+    scene = SceneTimeline(
+        scene_id="infall", simulation_id="sim", duration_s=5.0,
+        start_sim_time_s=0.0, end_sim_time_s=10.0, playback_speed=1.0,
+        entry_anchor="start", exit_anchor="finish",
+    )
+    with pytest.raises(ValueError, match="playback_speed"):
+        PlaybackSpec.from_scene(scene, fps=30)
