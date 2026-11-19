@@ -114,15 +114,23 @@ from the repository root (replace `blender` with your Blender executable path):
 
 ```bash
 uv run python scripts/generate_black_hole_trajectories.py radial-infall --output outputs/preview
-blender --background --python-exit-code 1 --python blender/preview_scene.py -- --dataset outputs/preview_radial_infall --scale 5e-8 --fps 24 --output outputs/first_blender_preview.blend
+blender --background --python-exit-code 1 --python blender/preview_scene.py -- --dataset outputs/preview_radial_infall --scale 5e-8 --fps 24
 ```
 
 A separate Blender smoke test validates the preview scene and keyframes
 without needing pytest in Blender's bundled Python:
 
 ```bash
-blender --background --python-exit-code 1 --python blender/tests/test_blender_integration.py -- --dataset outputs/preview_radial_infall --scale 5e-8 --fps 24 --output outputs/integration_test.blend
+blender --background --python-exit-code 1 --python blender/tests/test_blender_integration.py -- --dataset outputs/preview_radial_infall --scale 5e-8 --fps 24
 ```
+
+Both scripts save a separate `.blend` in `outputs/` using the dataset name,
+purpose and FPS (for example, `preview_radial_infall_preview_24fps.blend`).
+You can provide `--output outputs/my_scene.blend` to select a name. If that
+file already exists, the script saves `my_scene_001.blend`,
+`my_scene_002.blend`, etc., rather than overwriting it. The scripts print
+the final path, so individual versions can be opened again later. For example,
+24 FPS and 30 FPS integration runs produce distinct files automatically.
 
 **Not yet implemented:** cinematic rendering, exporting/FFmpeg video encoding,
 a graphical user interface and the other planned simulation animations.
