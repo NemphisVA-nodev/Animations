@@ -159,3 +159,44 @@ def test_multiple_particles_terminate_at_different_times() -> None:
     # Nearest particle (largest acceleration) terminates first.
     # radial_particles places particle 0 nearest (smallest radius).
     assert times[0] < times[1] < times[2]
+
+
+def test_rejects_particle_starting_at_or_inside_cutoff() -> None:
+    bh = _bh()
+    for radius in (CUTOFF, CUTOFF / 2):
+        with pytest.raises(ValueError, match="cutoff"):
+            integrate_particles(bh, _single_particle(radius), DURATION, STEPS)
+
+
+def test_rejects_empty_cloud() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        integrate_particles(_bh(), ParticleCloud(), DURATION, STEPS)
+
+
+def test_rejects_nonfinite_duration() -> None:
+    with pytest.raises(ValueError):
+        integrate_particles(_bh(), _single_particle(1.0e8), np.nan, STEPS)
+
+
+def test_rejects_noninteger_steps() -> None:
+    with pytest.raises(ValueError):
+        integrate_particles(_bh(), _single_particle(1.0e8), 1.0, 2.5)
+
+
+def test_solver_failure_does_not_return_partial_trajectory() -> None:
+    # Unsupported methods are errors, not successful simulation results.
+    with pytest.raises(ValueError):
+        integrate_particles(
+            _bh(), _single_particle(1.0e8), 1.0, 10,
+            method="not_a_solver",
+        )
+
+
+def test_records_solver_configuration() -> None:
+    result = integrate_particles(
+        _bh(), _single_particle(1.0e8), 1.0, 10,
+        rtol=1e-7, atol=1e-10, method="RK45",
+    )
+    assert result.solver_method == "RK45"
+    assert result.solver_rtol == pytest.approx(1e-7)
+    assert result.solver_atol == pytest.approx(1e-10)
