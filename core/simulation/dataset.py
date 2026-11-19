@@ -160,6 +160,9 @@ def validate_dataset(dataset: SimulationDataset) -> None:
 
     if not isinstance(arrays, dict):
         raise ValueError("arrays must be a dictionary")
+    for name, value in arrays.items():
+        if not isinstance(value, np.ndarray):
+            raise ValueError(f"array {name!r} is not a NumPy array")
 
     nonfinite_policy = metadata.get(NONFINITE_POLICY_KEY)
     if nonfinite_policy not in (None, NONFINITE_POLICY_MASKED):
@@ -196,8 +199,6 @@ def validate_dataset(dataset: SimulationDataset) -> None:
 
     lengths: list[int] = []
     for name, value in arrays.items():
-        if not isinstance(value, np.ndarray):
-            raise ValueError(f"array {name!r} is not a NumPy array")
         if value.size == 0:
             raise ValueError(f"array {name!r} is empty")
 
@@ -299,16 +300,23 @@ def validate_dataset(dataset: SimulationDataset) -> None:
         for name in TRAJECTORY_ARRAYS:
             if name in arrays and arrays[name].ndim == 3:
                 arr = arrays[name]
-                if arr.shape[0] != n_times or arr.shape[1] != n_particles:
+                if arr.shape != (n_times, n_particles, 2):
                     raise ValueError(
                         f"array {name!r} shape {arr.shape} must be "
-                        f"(T={n_times}, N={n_particles}, D)"
+                        f"(T={n_times}, N={n_particles}, 2)"
                     )
         if validity.shape != (n_times, n_particles):
             raise ValueError(
                 f"{VALIDITY_MASK_ARRAY!r} shape {validity.shape} must be "
                 f"(T={n_times}, N={n_particles})"
             )
+        if np.any(np.diff(validity.astype(np.int8), axis=0) > 0):
+            raise ValueError("terminated particles cannot become valid again")
+        identifiers = particle_ids.tolist()
+        if not all(identifier.strip() for identifier in identifiers):
+            raise ValueError("particle IDs must not be empty")
+        if len(set(identifiers)) != n_particles:
+            raise ValueError("particle IDs must be unique")
 
     # Timestamps, when present, must be strictly increasing.
     if "timestamps" in arrays:
@@ -467,8 +475,8 @@ def save_dataset(
         validate_dataset(dataset)
 
     stem = Path(path)
-    meta_path = stem.with_suffix(".meta.json")
-    data_path = stem.with_suffix(".data.npz")
+    meta_path = stem.with_name(stem.name + ".meta.json")
+    data_path = stem.with_name(stem.name + ".data.npz")
 
     metadata = dict(dataset.metadata)
     metadata["array_sources"] = {
@@ -505,8 +513,8 @@ def load_dataset(path: str | Path) -> SimulationDataset:
             data_stem = path.stem
         data_path = path.with_name(data_stem + ".data.npz")
     else:
-        data_path = path.with_suffix(".data.npz")
-        meta_path = path.with_suffix(".meta.json")
+        data_path = path.with_name(path.name + ".data.npz")
+        meta_path = path.with_name(path.name + ".meta.json")
 
     if not meta_path.exists():
         raise FileNotFoundError(f"metadata file not found: {meta_path}")
@@ -536,6 +544,6 @@ def metadata_only(path: str | Path) -> SimulationMetadata:
     elif path.suffix == ".json":
         meta_path = path
     else:
-        meta_path = path.with_suffix(".meta.json")
+        meta_path = path.with_name(path.name + ".meta.json")
     with open(meta_path, "r", encoding="utf-8") as handle:
         return json.load(handle)
