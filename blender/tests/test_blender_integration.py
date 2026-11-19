@@ -73,15 +73,23 @@ def _verify_keyframes_exist(particle_ids: list[str]) -> None:
         assert obj.animation_data.action is not None, (
             f"no action on {pid!r}"
         )
-        # Count fcurves across layered Actions.
-        fcurve_count = 0
+        # Validate position curves in Blender's layered Action structure.
+        location_curves = 0
         for layer in obj.animation_data.action.layers:
             for strip in layer.strips:
                 if strip.type != "KEYFRAME":
                     continue
                 for channelbag in strip.channelbags:
-                    fcurve_count += len(channelbag.fcurves)
-        assert fcurve_count > 0, f"no fcurves on {pid!r}"
+                    for curve in channelbag.fcurves:
+                        if curve.data_path == "location":
+                            location_curves += 1
+                            assert all(
+                                kp.interpolation == "LINEAR"
+                                for kp in curve.keyframe_points
+                            ), f"{pid!r}: non-linear location curve"
+        assert location_curves == 3, (
+            f"{pid!r}: expected 3 XYZ location curves, got {location_curves}"
+        )
 
 
 def _verify_positions_match_sampled(

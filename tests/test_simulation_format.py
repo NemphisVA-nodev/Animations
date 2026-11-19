@@ -91,6 +91,17 @@ def test_missing_required_units_rejected() -> None:
         validate_dataset(SimulationDataset(metadata=bad, arrays={}))
 
 
+@pytest.mark.parametrize(
+    ("unit_key", "invalid_unit"),
+    [("time", "ms"), ("position", "km"), ("acceleration", "km/s^2")],
+)
+def test_rejects_non_si_units(unit_key: str, invalid_unit: str) -> None:
+    metadata = _base_metadata()
+    metadata["units"] = {**metadata["units"], unit_key: invalid_unit}
+    with pytest.raises(ValueError, match="unit for"):
+        validate_dataset(SimulationDataset(metadata=metadata, arrays={}))
+
+
 def test_empty_reference_frame_rejected() -> None:
     meta = _base_metadata()
     bad = dict(meta)
@@ -107,6 +118,13 @@ def test_array_must_be_one_dimensional(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError):
         validate_dataset(bad)
+
+
+def test_timestamps_must_be_numeric(tmp_path: Path) -> None:
+    dataset = _base_dataset(tmp_path)
+    dataset.arrays["timestamps"] = np.array(["0", "1", "2"])
+    with pytest.raises(ValueError, match="timestamps must contain real numeric"):
+        validate_dataset(dataset)
 
 
 def test_array_must_be_finite(tmp_path: Path) -> None:

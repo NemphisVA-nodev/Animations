@@ -151,6 +151,11 @@ def validate_dataset(dataset: SimulationDataset) -> None:
     for key, value in units.items():
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"unit for {key!r} must be a non-empty string")
+        expected = ALLOWED_UNITS.get(key)
+        if expected is not None and value != expected:
+            raise ValueError(
+                f"unit for {key!r} must be {expected!r}, got {value!r}"
+            )
 
     reference_frame = metadata.get("reference_frame", {})
     if not isinstance(reference_frame, dict) or not reference_frame:
@@ -244,6 +249,8 @@ def validate_dataset(dataset: SimulationDataset) -> None:
 
         # Finiteness rules.
         if name == "timestamps":
+            if value.dtype.kind not in ("f", "i", "u"):
+                raise ValueError("timestamps must contain real numeric values")
             if not np.all(np.isfinite(value)):
                 raise ValueError(f"array {name!r} contains non-finite values")
         elif name == PARTICLE_IDS_ARRAY:
