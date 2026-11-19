@@ -39,3 +39,16 @@ def next_available_blend_path(requested: str | Path) -> Path:
             return candidate
 
     raise FileExistsError(f"no available Blender output filename near {path}")
+
+def next_available_png_path(requested: str | Path) -> Path:
+    """Choose a free PNG filename without overwriting prior still renders."""
+    path = Path(requested).expanduser().resolve()
+    if path.suffix.lower() != ".png":
+        raise ValueError("render output path must end in .png")
+    if not path.exists():
+        return path
+    for number in range(1, 10000):
+        candidate = path.with_name(f"{path.stem}_{number:03d}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"no available PNG output filename near {path}")
