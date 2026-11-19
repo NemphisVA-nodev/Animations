@@ -277,3 +277,22 @@ def test_dataset_rejects_reactivation_without_prior_cutoff(validity) -> None:
     )
     with pytest.raises(ValueError, match="reactivate"):
         validate_dataset(dataset)
+
+
+def test_generator_preserves_dotted_output_stem(monkeypatch, tmp_path: Path) -> None:
+    from argparse import Namespace
+    from scripts import generate_black_hole_trajectories as generator
+
+    generated = []
+
+    def capture(*args, **kwargs):
+        generated.append(kwargs["output_stem"])
+
+    monkeypatch.setattr(generator, "_run_scenario", capture)
+    generator.scenario_a_radial_infall(Namespace(
+        mass=1.9885e30, cutoff=1.0e6,
+        initial_radius=4.0e6, spacing=1.0e5,
+        duration=1.0, steps=20, length=1.0e5,
+        output=str(tmp_path / "example.v1"),
+    ))
+    assert generated == [tmp_path / "example.v1_radial_infall"]
