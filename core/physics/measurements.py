@@ -9,30 +9,23 @@ describe relative test-particle motion, not real material deformation.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
+from scipy.spatial.distance import pdist
 
-from .black_hole import BlackHole
 from .integration import TrajectoryResult
 
 
-def _valid_positions_at(
-    result: TrajectoryResult, time_index: int
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return positions and ids of valid particles at a time index."""
-    mask = result.validity_mask[time_index]
-    positions = result.positions[time_index][mask]
-    ids = np.array(result.particle_ids)[mask]
-    return positions, ids
+def _valid_positions_at(result: TrajectoryResult, time_index: int) -> np.ndarray:
+    """Positions of particles still active at this time."""
+    return result.positions[time_index, result.validity_mask[time_index]]
 
 
-def geometric_center(result: TrajectoryResult, time_index: int) -> Optional[np.ndarray]:
+def geometric_center(result: TrajectoryResult, time_index: int) -> np.ndarray | None:
     """Geometric centre of the valid particles at a time index.
 
     Returns None if no particle is valid at that index.
     """
-    positions, _ = _valid_positions_at(result, time_index)
+    positions = _valid_positions_at(result, time_index)
     if positions.size == 0:
         return None
     return np.mean(positions, axis=0)
@@ -44,7 +37,6 @@ def cloud_centres_over_time(result: TrajectoryResult) -> np.ndarray:
     Times with no valid particles are NaN.
     """
     timestamps = result.timestamps
-    count = len(result.particle_ids)
     centres = np.full((timestamps.size, 2), np.nan, dtype=np.float64)
     for t in range(timestamps.size):
         centre = geometric_center(result, t)
@@ -80,7 +72,7 @@ def radial_extent(result: TrajectoryResult) -> np.ndarray:
     """
     extents = np.full(result.timestamps.size, np.nan, dtype=np.float64)
     for t in range(result.timestamps.size):
-        positions, _ = _valid_positions_at(result, t)
+        positions = _valid_positions_at(result, t)
         if positions.size == 0:
             continue
         centre = np.mean(positions, axis=0)
@@ -104,7 +96,7 @@ def transverse_extent(result: TrajectoryResult) -> np.ndarray:
     extents = np.full(timestamps.size, np.nan, dtype=np.float64)
     centres = cloud_centres_over_time(result)
     for t in range(timestamps.size):
-        positions, _ = _valid_positions_at(result, t)
+        positions = _valid_positions_at(result, t)
         if positions.size == 0:
             continue
         centre = centres[t]
@@ -132,14 +124,10 @@ def mean_pairwise_separation(result: TrajectoryResult) -> np.ndarray:
     timestamps = result.timestamps
     separations = np.full(timestamps.size, np.nan, dtype=np.float64)
     for t in range(timestamps.size):
-        positions, _ = _valid_positions_at(result, t)
+        positions = _valid_positions_at(result, t)
         if positions.shape[0] < 2:
             continue
-        diff = positions[:, None, :] - positions[None, :, :]
-        distances = np.linalg.norm(diff, axis=2)
-        # Upper triangle without diagonal.
-        iu = np.triu_indices(positions.shape[0], k=1)
-        separations[t] = float(np.mean(distances[iu]))
+        separations[t] = float(np.mean(pdist(positions)))
     return separations
 
 
@@ -167,24 +155,15 @@ def radial_tidal_acceleration(
     if not np.isfinite(object_length_m) or object_length_m <= 0.0:
         raise ValueError("object_length_m must be a positive finite value")
 
-    from .tidal import TidalParameters, tidal_difference_approximate
+    from scipy.constants import G
 
-    timestamps = result.timestamps
-    values = np.full(timestamps.size, np.nan, dtype=np.float64)
     centres = cloud_centres_over_time(result)
-    for t in range(timestamps.size):
-        centre = centres[t]
-        if np.any(np.isnan(centre)):
-            continue
-        distance = float(np.linalg.norm(centre - result.black_hole.position))
-        if distance <= object_length_m / 2.0:
-            continue
-        params = TidalParameters(
-            attracting_mass_kg=result.black_hole.mass_kg,
-            object_length_m=object_length_m,
-            center_distance_m=distance,
-        )
-        values[t] = tidal_difference_approximate(params)
+    distances = np.linalg.norm(centres - result.black_hole.position, axis=1)
+    values = np.full(result.timestamps.size, np.nan, dtype=np.float64)
+    valid = np.isfinite(distances) & (distances > object_length_m / 2.0)
+    values[valid] = (
+        2.0 * G * result.black_hole.mass_kg * object_length_m / distances[valid] ** 3
+    )
     return values
 
 
