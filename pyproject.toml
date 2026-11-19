@@ -8,7 +8,7 @@ authors = [
     { name = "NemphisVA-nodev" },
 ]
 keywords = ["physics", "animation", "simulation", "matplotlib", "science", "education"]
-license = { text = "MIT" }
+license = "LicenseRef-Proprietary"
 dependencies = [
     "matplotlib>=3.11.2",
     "numpy>=2.5.5",
