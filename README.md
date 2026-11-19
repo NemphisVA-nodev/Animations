@@ -68,4 +68,23 @@ Animations/
 
 ## Current development status
 
-**Initialization phase.** The project architecture and development environment have been set up. No physics simulations, rendering, graphical user interface, or animation demos have been implemented yet. The next step is to implement the physics, rendering, and exporting engines described in `docs/architecture.md`.
+**Presentation-driven simulation foundation.** The development environment,
+project architecture, package structure, and test suite are in place. The
+following Python-side (no Blender) foundation has been implemented and tested:
+
+- Newtonian tidal acceleration physics (`core/physics/tidal.py`) in SI units,
+  frame-rate independent.
+- Renderer-independent simulation data contracts: JSON metadata + compressed
+  NPZ arrays with versioned schema and validation (`core/simulation/`).
+- Presentation timeline model distinguishing simulation time, playback time,
+  and presentation time (`core/timeline.py`).
+- Transition specification for scene-to-scene visual alignment
+  (`core/transitions.py`).
+- Deterministic example tidal-acceleration dataset generator
+  (`scripts/generate_tidal_dataset.py`) with output in `outputs/`.
+- Test suite covering physics, data format, timeline, and transitions.
+
+**Not yet implemented:** the rendering engine, exporting/FFmpeg video
+encoding, graphical user interface, animation demos, and Blender integration.
+No physics simulations are rendered to video yet. See `docs/` for the planned
+architecture, storyboard, data format, and transition design.

@@ -1,0 +1,161 @@
+"""Tests for the simulation data format contract (schema + validation).
+
+Independent of any graphical rendering.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from core.simulation.dataset import (
+    SimulationDataset,
+    SimulationMetadata,
+    SCHEMA_VERSION,
+    save_dataset,
+    validate_dataset,
+)
+
+
+def _base_metadata() -> SimulationMetadata:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "simulation_id": "fmt_test",
+        "simulation_type": "tidal_acceleration",
+        "model": "newtonian_point_mass_tidal",
+        "model_limitations": "Newtonian only.",
+        "units": {"time": "s", "position": "m", "acceleration": "m/s^2"},
+        "reference_frame": {
+            "origin": "centre of attracting mass",
+            "radial_axis": "positive outward",
+        },
+        "physical_parameters": {"mass_kg": 5.972e24},
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "array_sources": {},
+        "notes": "",
+    }
+
+
+def _base_dataset(tmp_path: Path) -> SimulationDataset:
+    return SimulationDataset(
+        metadata=_base_metadata(),
+        arrays={
+            "timestamps": np.array([0.0, 1.0, 2.0], dtype=np.float64),
+            "positions": np.array([1.0, 2.0, 3.0], dtype=np.float64),
+        },
+    )
+
+
+def test_required_metadata_keys_enforced() -> None:
+    meta = _base_metadata()
+    for key in (
+        "schema_version",
+        "simulation_id",
+        "simulation_type",
+        "model",
+        "model_limitations",
+        "units",
+        "reference_frame",
+        "physical_parameters",
+        "created_at",
+    ):
+        bad = dict(meta)
+        bad[key] = None
+        with pytest.raises(ValueError):
+            validate_dataset(SimulationDataset(metadata=bad, arrays={}))
+
+
+def test_empty_string_metadata_rejected() -> None:
+    meta = _base_metadata()
+    bad = dict(meta)
+    bad["simulation_id"] = "   "
+    with pytest.raises(ValueError):
+        validate_dataset(SimulationDataset(metadata=bad, arrays={}))
+
+
+def test_unsupported_schema_version_rejected() -> None:
+    meta = _base_metadata()
+    bad = dict(meta)
+    bad["schema_version"] = "0.9.0"
+    with pytest.raises(ValueError):
+        validate_dataset(SimulationDataset(metadata=bad, arrays={}))
+
+
+def test_missing_required_units_rejected() -> None:
+    meta = _base_metadata()
+    bad = dict(meta)
+    bad["units"] = {"position": "m"}  # missing "time"
+    with pytest.raises(ValueError):
+        validate_dataset(SimulationDataset(metadata=bad, arrays={}))
+
+
+def test_empty_reference_frame_rejected() -> None:
+    meta = _base_metadata()
+    bad = dict(meta)
+    bad["reference_frame"] = {}
+    with pytest.raises(ValueError):
+        validate_dataset(SimulationDataset(metadata=bad, arrays={}))
+
+
+def test_array_must_be_one_dimensional(tmp_path: Path) -> None:
+    dataset = _base_dataset(tmp_path)
+    bad = SimulationDataset(
+        metadata=dataset.metadata,
+        arrays={"timestamps": np.zeros((2, 2), dtype=np.float64)},
+    )
+    with pytest.raises(ValueError):
+        validate_dataset(bad)
+
+
+def test_array_must_be_finite(tmp_path: Path) -> None:
+    dataset = _base_dataset(tmp_path)
+    bad = SimulationDataset(
+        metadata=dataset.metadata,
+        arrays={
+            "timestamps": np.array([0.0, np.inf, 2.0], dtype=np.float64),
+            "positions": np.array([1.0, 2.0, 3.0], dtype=np.float64),
+        },
+    )
+    with pytest.raises(ValueError):
+        validate_dataset(bad)
+
+
+def test_arrays_must_share_length(tmp_path: Path) -> None:
+    dataset = _base_dataset(tmp_path)
+    bad = SimulationDataset(
+        metadata=dataset.metadata,
+        arrays={
+            "timestamps": np.array([0.0, 1.0, 2.0], dtype=np.float64),
+            "positions": np.array([1.0, 2.0], dtype=np.float64),
+        },
+    )
+    with pytest.raises(ValueError):
+        validate_dataset(bad)
+
+
+def test_timestamps_must_be_strictly_increasing(tmp_path: Path) -> None:
+    dataset = _base_dataset(tmp_path)
+    bad = SimulationDataset(
+        metadata=dataset.metadata,
+        arrays={
+            "timestamps": np.array([0.0, 2.0, 1.0], dtype=np.float64),
+            "positions": np.array([1.0, 2.0, 3.0], dtype=np.float64),
+        },
+    )
+    with pytest.raises(ValueError):
+        validate_dataset(bad)
+
+
+def test_save_load_roundtrip_preserves_precision(tmp_path: Path) -> None:
+    dataset = _base_dataset(tmp_path)
+    stem = tmp_path / "fmt"
+    save_dataset(dataset, stem)
+    from core.simulation.dataset import load_dataset
+
+    loaded = load_dataset(stem)
+    for name in dataset.arrays:
+        assert np.array_equal(loaded.arrays[name], dataset.arrays[name])
+    assert loaded.arrays["timestamps"].dtype == np.float64
+    assert loaded.metadata["schema_version"] == SCHEMA_VERSION
