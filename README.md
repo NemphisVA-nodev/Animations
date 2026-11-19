@@ -132,7 +132,7 @@ file already exists, the script saves `my_scene_001.blend`,
 the final path, so individual versions can be opened again later. For example,
 24 FPS and 30 FPS integration runs produce distinct files automatically.
 
-**Step 5C cinematic prototype (in development):** A separate Blender entry point
+**Step 5C cinematic prototype (in development; see [cinematic preview guide](docs/cinematic_preview.md)):** A separate Blender entry point
 adds schematic glow rings around the black-hole marker, a dark material,
 emissive particles, animated trailing curves that only reveal past calculated
 positions, and an automatically framed orthographic camera. Blender 5.3 Eevee

@@ -1,8 +1,7 @@
-"""Choose descriptive Blender output names without silently replacing earlier files.
+"""Choose descriptive output paths without overwriting earlier Blender artifacts.
 
-These helpers use only the standard library, so normal pytest can cover them
-without starting Blender. They avoid collisions for sequential local runs;
-simultaneous writers to the same directory should use separate output folders.
+Filename reservation is designed for sequential local runs. Concurrent
+processes should use separate output folders.
 """
 
 from __future__ import annotations
@@ -11,25 +10,21 @@ from pathlib import Path
 
 
 def default_blend_output(dataset: str | Path, fps: float, *, kind: str) -> Path:
-    """Build a descriptive output name from the dataset, purpose and frame rate."""
+    """Build a descriptive .blend filename from dataset, purpose and FPS."""
     name = Path(dataset).name
     for suffix in (".meta.json", ".data.npz"):
         if name.endswith(suffix):
-            name = name[: -len(suffix)]
+            name = name[:-len(suffix)]
             break
     fps_label = f"{fps:g}".replace(".", "p")
     return Path("outputs") / f"{name}_{kind}_{fps_label}fps.blend"
 
 
-def next_available_blend_path(requested: str | Path) -> Path:
-    """Use the requested path, or append _001, _002, ... if it already exists.
-
-    Never delete, truncate or overwrite an existing .blend. The resolved
-    output path is returned so the caller can print the exact saved filename.
-    """
+def _next_available_output_path(requested: str | Path, extension: str) -> Path:
+    """Return a free output path, adding _001, _002, ... after collisions."""
     path = Path(requested).expanduser().resolve()
-    if path.suffix.lower() != ".blend":
-        raise ValueError("Blender output path must end in .blend")
+    if path.suffix.lower() != extension:
+        raise ValueError(f"output path must end in {extension}")
     if not path.exists():
         return path
 
@@ -37,18 +32,14 @@ def next_available_blend_path(requested: str | Path) -> Path:
         candidate = path.with_name(f"{path.stem}_{number:03d}{path.suffix}")
         if not candidate.exists():
             return candidate
+    raise FileExistsError(f"no available output filename near {path}")
 
-    raise FileExistsError(f"no available Blender output filename near {path}")
+
+def next_available_blend_path(requested: str | Path) -> Path:
+    """Choose a free .blend filename without overwriting a prior scene."""
+    return _next_available_output_path(requested, ".blend")
+
 
 def next_available_png_path(requested: str | Path) -> Path:
-    """Choose a free PNG filename without overwriting prior still renders."""
-    path = Path(requested).expanduser().resolve()
-    if path.suffix.lower() != ".png":
-        raise ValueError("render output path must end in .png")
-    if not path.exists():
-        return path
-    for number in range(1, 10000):
-        candidate = path.with_name(f"{path.stem}_{number:03d}{path.suffix}")
-        if not candidate.exists():
-            return candidate
-    raise FileExistsError(f"no available PNG output filename near {path}")
+    """Choose a free .png filename without overwriting a prior still render."""
+    return _next_available_output_path(requested, ".png")
