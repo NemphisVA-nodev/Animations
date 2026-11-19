@@ -73,7 +73,7 @@ project architecture, package structure, and test suite are in place. The
 following Python-side (no Blender) foundation has been implemented and tested:
 
 - Development environment: `uv`-managed local `.venv`, NumPy, SciPy, Matplotlib,
-  Pillow, and pytest (119 passing tests).
+  Pillow, and pytest (including physics, dataset and playback regression tests).
 - Package structure: `core/` (physics, rendering, exporting, simulation),
   `animations/` (spaghettification, lensing, orbits, chaos), `tests/`, `docs/`,
   `assets/`, `outputs/`, `scripts/`.
@@ -92,6 +92,8 @@ following Python-side (no Blender) foundation has been implemented and tested:
   trajectories with an explicit validity mask (readable with `json` + `numpy`).
 - Presentation timeline (`core/timeline.py`) and transition
   (`core/transitions.py`) specifications.
+- Renderer-independent frame mapping and masked trajectory sampling
+  (`core/playback.py`), documented in `docs/simulation_to_frame_mapping.md`.
 - Deterministic example dataset generators:
   `scripts/generate_tidal_dataset.py` and
   `scripts/generate_black_hole_trajectories.py` (radial-infall + tidal-cloud
@@ -99,7 +101,7 @@ following Python-side (no Blender) foundation has been implemented and tested:
 - Documentation: storyboard, data format, transition architecture, black hole
   simulation, and spaghettification physics.
 
-**Not yet implemented:** the rendering engine, exporting/FFmpeg video
+**Not yet implemented:** Blender integration, the rendering engine, exporting/FFmpeg video
 encoding, graphical user interface, animation demos, and Blender integration.
 No physics simulations are rendered to video yet. See `docs/` for the planned
 architecture, storyboard, data format, and transition design.
