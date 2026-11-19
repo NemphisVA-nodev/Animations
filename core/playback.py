@@ -1,85 +1,24 @@
-"""Physical-time-to-frame mapping and trajectory sampling.
+"""Map physical simulation time to video frames and sample particle trajectories.
 
-Bridges simulation data (physical time in seconds) and animation frames
-(presentation time in seconds at a fixed frame rate). Renderer-independent:
-no Blender, Matplotlib, GUI, or SciPy is required, so a future Blender
-importer can use this with only the Python standard library and NumPy.
-
-Two concerns:
-
-1. ``FrameMapping`` converts a scene's presentation duration and frame rate
-   into a deterministic list of frame timestamps and physical simulation
-   times.
-2. ``sample_particle_positions`` reads particle positions at arbitrary
-   physical times from a :class:`SimulationDataset`, interpolating only
-   between valid neighbouring samples and never fabricating data after a
-   particle's termination.
-
-Timing convention (fixed-rate):
-
-* Effective playback speed = simulation span / presentation duration, in
-  simulation seconds per presentation second.
-* ``num_frames = max(1, round(duration_s * fps))``.
-* Frame ``i`` (0-indexed) presents at ``i / fps`` seconds and maps to
-  simulation time ``start_sim_time_s + (i / fps) * effective_playback_speed``.
-* The simulation window end (``end_sim_time_s``) is the scene boundary; it
-  is not forcibly placed on the final active frame, so the last frame may
-  land slightly before the boundary when ``duration_s * fps`` is not an
-  integer.
-* Hold frames freeze at the last active frame's simulation time and do not
-  advance simulation time.
-
-This convention makes adjacent scenes continuous: if scene B starts where
-scene A ends (``start_sim_time_s`` equal), scene B's frame 0 begins at that
-same physical time.
+Frames are sampled at regular presentation times (i / fps). The end of a
+scene's simulation window is its boundary, not an extra video frame.
+Everything here is independent of Blender and SciPy.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from core.simulation.dataset import SimulationDataset
-
-__all__ = [
-    "FrameMapping",
-    "PlaybackSpec",
-    "build_frame_mapping",
-    "sample_particle_positions",
-]
-
-_TIMESTAMPS_KEY = "timestamps"
-_POSITIONS_KEY = "positions"
-_VALIDITY_MASK_KEY = "validity_mask"
-_PARTICLE_IDS_KEY = "particle_ids"
+if TYPE_CHECKING:
+    from core.simulation.dataset import SimulationDataset
 
 
 @dataclass(frozen=True)
 class PlaybackSpec:
-    """Specification for mapping simulation time to presentation frames.
-
-    Attributes
-    ----------
-    scene_id:
-        Unique identifier for the scene within a presentation.
-    simulation_id:
-        Identifier of the simulation dataset consumed by this scene, or
-        ``None`` for conceptual/observational scenes.
-    fps:
-        Presentation frame rate in frames per second (> 0).
-    duration_s:
-        Presentation duration of the scene in seconds (> 0).
-    start_sim_time_s:
-        Start of the physical simulation window consumed, in SI seconds.
-    end_sim_time_s:
-        End of the physical simulation window consumed, in SI seconds
-        (>= start). Treated as the scene boundary.
-    hold_s:
-        Optional hold period appended after the active frames, in seconds
-        (>= 0). Hold frames freeze at the last active frame's simulation
-        time.
-    """
+    """Timing for one scene, in seconds and frames per second."""
 
     scene_id: str
     simulation_id: str | None
@@ -92,60 +31,27 @@ class PlaybackSpec:
     def __post_init__(self) -> None:
         if not self.scene_id.strip():
             raise ValueError("scene_id must be non-empty")
-        for name, value in (
-            ("fps", self.fps),
-            ("duration_s", self.duration_s),
-            ("start_sim_time_s", self.start_sim_time_s),
-            ("end_sim_time_s", self.end_sim_time_s),
-            ("hold_s", self.hold_s),
+
+        for name in (
+            "fps", "duration_s", "start_sim_time_s", "end_sim_time_s", "hold_s"
         ):
-            if not np.isfinite(value):
+            if not np.isfinite(getattr(self, name)):
                 raise ValueError(f"{name} must be finite")
-        if self.fps <= 0.0:
-            raise ValueError("fps must be positive")
-        if self.duration_s <= 0.0:
-            raise ValueError("duration_s must be positive")
+
+        if self.fps <= 0 or self.duration_s <= 0:
+            raise ValueError("fps and duration_s must be positive")
         if self.end_sim_time_s < self.start_sim_time_s:
             raise ValueError("end_sim_time_s must be >= start_sim_time_s")
-        if self.hold_s < 0.0:
+        if self.hold_s < 0:
             raise ValueError("hold_s must be non-negative")
 
 
 @dataclass(frozen=True)
 class FrameMapping:
-    """Deterministic mapping from presentation frames to simulation time.
+    """Frame timestamps and their corresponding physical simulation times.
 
-    Attributes
-    ----------
-    scene_id:
-        Scene identifier.
-    simulation_id:
-        Simulation dataset identifier, or ``None`` for conceptual scenes.
-    fps:
-        Frame rate in frames per second.
-    duration_s:
-        Presentation duration in seconds.
-    start_sim_time_s:
-        Physical simulation time at frame 0, in seconds.
-    end_sim_time_s:
-        Physical simulation time at the scene boundary (end of the window).
-    num_frames:
-        Number of active (simulation-advancing) frames.
-    frame_times_s:
-        Presentation time of each active frame, shape ``(num_frames,)``.
-    sim_times_s:
-        Physical simulation time at each active frame, shape
-        ``(num_frames,)``. Frame 0 is ``start_sim_time_s``.
-    effective_playback_speed:
-        Simulation seconds per presentation second, equals
-        ``(end_sim_time_s - start_sim_time_s) / duration_s``.
-    hold_s:
-        Hold duration in seconds.
-    endpoint_sim_time_s:
-        Physical simulation time of the last active frame; hold frames
-        freeze at this value.
-    total_frames:
-        ``num_frames + hold_frames``.
+    `frame_times_s` and `sim_times_s` describe active frames only.
+    Use `all_sim_times_s` to include the frozen frames of a hold.
     """
 
     scene_id: str
@@ -164,66 +70,43 @@ class FrameMapping:
 
     @property
     def sim_span_s(self) -> float:
-        """Duration of the physical simulation window consumed."""
         return self.end_sim_time_s - self.start_sim_time_s
 
     @property
     def hold_frames(self) -> int:
-        """Number of hold frames (frozen at ``endpoint_sim_time_s``)."""
         return self.total_frames - self.num_frames
+
+    @property
+    def all_frame_times_s(self) -> np.ndarray:
+        """Presentation times, including holds, sampled at the video FPS."""
+        return np.arange(self.total_frames, dtype=np.float64) / self.fps
+
+    @property
+    def all_sim_times_s(self) -> np.ndarray:
+        """Physical times of every rendered frame, with holds frozen."""
+        if not self.hold_frames:
+            return self.sim_times_s.copy()
+        return np.concatenate((
+            self.sim_times_s,
+            np.full(self.hold_frames, self.endpoint_sim_time_s),
+        ))
 
 
 def build_frame_mapping(spec: PlaybackSpec) -> FrameMapping:
-    """Build a deterministic frame-to-simulation-time mapping.
-
-    Parameters
-    ----------
-    spec:
-        Playback specification.
-
-    Returns
-    -------
-    FrameMapping
-        Deterministic mapping using the fixed-rate convention.
-    """
-    if not spec.scene_id.strip():
-        raise ValueError("scene_id must be non-empty")
-    for name, value in (
-        ("fps", spec.fps),
-        ("duration_s", spec.duration_s),
-        ("start_sim_time_s", spec.start_sim_time_s),
-        ("end_sim_time_s", spec.end_sim_time_s),
-        ("hold_s", spec.hold_s),
-    ):
-        if not np.isfinite(value):
-            raise ValueError(f"{name} must be finite")
-    if spec.fps <= 0.0:
-        raise ValueError("fps must be positive")
-    if spec.duration_s <= 0.0:
-        raise ValueError("duration_s must be positive")
-    if spec.end_sim_time_s < spec.start_sim_time_s:
-        raise ValueError("end_sim_time_s must be >= start_sim_time_s")
-    if spec.hold_s < 0.0:
-        raise ValueError("hold_s must be non-negative")
-
+    """Sample one scene on a fixed-rate video frame grid."""
     sim_span = spec.end_sim_time_s - spec.start_sim_time_s
-    effective_playback_speed = sim_span / spec.duration_s
+    speed = sim_span / spec.duration_s
+    if not np.isfinite(speed):
+        raise ValueError("simulation span and duration produce an invalid speed")
 
-    # Deterministic frame count.
-    num_frames = max(1, int(round(spec.duration_s * spec.fps)))
+    num_frames = max(1, round(spec.duration_s * spec.fps))
+    hold_frames = round(spec.hold_s * spec.fps)
+    frame_times = np.arange(num_frames, dtype=np.float64) / spec.fps
+    sim_times = spec.start_sim_time_s + frame_times * speed
 
-    # Presentation time of each active frame: 0, 1/fps, 2/fps, ...
-    frame_times_s = np.arange(num_frames, dtype=np.float64) / spec.fps
-
-    # Physical simulation time at each active frame (fixed-rate convention).
-    # Frame 0 -> start_sim_time_s. The end of the window is the scene
-    # boundary; the last frame approximates it and is not forcibly anchored.
-    sim_times_s = spec.start_sim_time_s + frame_times_s * effective_playback_speed
-
-    # Hold frames freeze at the last active frame's simulation time.
-    endpoint_sim_time_s = float(sim_times_s[-1])
-    hold_frames = max(0, int(round(spec.hold_s * spec.fps)))
-    total_frames = num_frames + hold_frames
+    # A short scene rounded up to one frame still begins at its start time.
+    # Floating point rounding should never push a frame past the boundary.
+    sim_times = np.minimum(sim_times, spec.end_sim_time_s)
 
     return FrameMapping(
         scene_id=spec.scene_id,
@@ -233,91 +116,76 @@ def build_frame_mapping(spec: PlaybackSpec) -> FrameMapping:
         start_sim_time_s=spec.start_sim_time_s,
         end_sim_time_s=spec.end_sim_time_s,
         num_frames=num_frames,
-        frame_times_s=frame_times_s,
-        sim_times_s=sim_times_s,
-        effective_playback_speed=effective_playback_speed,
+        frame_times_s=frame_times,
+        sim_times_s=sim_times,
+        effective_playback_speed=speed,
         hold_s=spec.hold_s,
-        endpoint_sim_time_s=endpoint_sim_time_s,
-        total_frames=total_frames,
+        endpoint_sim_time_s=float(sim_times[-1]),
+        total_frames=num_frames + hold_frames,
     )
 
 
-def _last_valid_index(validity_mask: np.ndarray, particle_index: int) -> int:
-    """Return the last valid sample index for a particle, or -1 if none."""
-    column = validity_mask[:, particle_index]
-    valid = np.flatnonzero(column)
-    return int(valid[-1]) if valid.size else -1
+def _trajectory_arrays(
+    dataset: SimulationDataset,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
+    """Check the arrays needed for interpolation and return their contents."""
+    arrays = dataset.arrays
+    required = ("timestamps", "positions", "velocities", "validity_mask", "particle_ids")
+    missing = [name for name in required if name not in arrays]
+    if missing:
+        raise ValueError(f"dataset missing required trajectory arrays: {missing}")
 
+    for name in required:
+        if not isinstance(arrays[name], np.ndarray):
+            raise ValueError(f"array {name!r} must be a NumPy array")
 
-def _interpolate_at_time(
-    timestamps: np.ndarray,
-    positions: np.ndarray,
-    validity_mask: np.ndarray,
-    particle_index: int,
-    query_time: float,
-) -> tuple[np.ndarray, bool]:
-    """Interpolate one particle's position at a single physical time.
+    times = arrays["timestamps"]
+    positions = arrays["positions"]
+    velocities = arrays["velocities"]
+    mask = arrays["validity_mask"]
+    ids = arrays["particle_ids"]
 
-    Uses :func:`numpy.searchsorted` for O(log T) lookup. Only interpolates
-    between valid neighbouring samples; never crosses invalid samples or
-    extrapolates beyond the last valid position.
+    if (
+        times.ndim != 1
+        or times.size == 0
+        or times.dtype.kind not in ("f", "i", "u")
+        or not np.all(np.isfinite(times))
+        or np.any(np.diff(times) <= 0)
+    ):
+        raise ValueError("timestamps must be a finite, increasing 1-D array")
 
-    Parameters
-    ----------
-    timestamps:
-        Strictly increasing 1-D simulation timestamps, shape ``(T,)``.
-    positions:
-        Particle positions, shape ``(T, N, 2)``.
-    validity_mask:
-        Boolean validity, shape ``(T, N)``. Must be a contiguous valid
-        prefix per particle (no reactivation).
-    particle_index:
-        Index of the particle to sample.
-    query_time:
-        Physical simulation time in seconds.
+    if mask.dtype.kind != "b" or mask.ndim != 2:
+        raise ValueError("validity_mask must be a two-dimensional boolean array")
 
-    Returns
-    -------
-    tuple of (np.ndarray, bool)
-        ``(position, is_valid)`` where ``position`` is shape ``(2,)`` in
-        metres. ``is_valid`` is ``False`` when no valid position exists at
-        that time.
-    """
-    nan_position = np.array([np.nan, np.nan], dtype=np.float64)
+    n_times, n_particles = mask.shape
+    if n_times != times.size or n_particles == 0:
+        raise ValueError("validity_mask must match timestamps and have particles")
 
-    last_valid = _last_valid_index(validity_mask, particle_index)
-    if last_valid < 0:
-        return nan_position, False
+    for name, value in (("positions", positions), ("velocities", velocities)):
+        if value.shape != (n_times, n_particles, 2) or value.dtype.kind != "f":
+            raise ValueError(f"{name} must be a real floating-point (T, N, 2) array")
+        if not np.all(np.isfinite(value[mask])) or not np.all(np.isnan(value[~mask])):
+            raise ValueError(f"{name} must be finite when valid and NaN when invalid")
 
-    # Valid samples are timestamps[0 : last_valid + 1] (contiguous prefix).
-    t_first = float(timestamps[0])
-    t_last = float(timestamps[last_valid])
-    if query_time < t_first or query_time > t_last:
-        return nan_position, False
+    # Once a particle reaches the cutoff, it cannot become valid again.
+    if np.any(~mask[:-1] & mask[1:]):
+        raise ValueError("validity_mask must not allow a particle to reactivate")
 
-    # Rightmost valid index whose timestamp is <= query_time.
-    pos = int(np.searchsorted(timestamps, query_time, side="right") - 1)
-    if pos < 0:
-        return nan_position, False
-    if pos > last_valid:
-        pos = last_valid
+    if ids.ndim != 1 or ids.size != n_particles or ids.dtype.kind not in ("U", "S"):
+        raise ValueError("particle_ids must be a string array of length N")
 
-    if timestamps[pos] == query_time:
-        # Exactly on a valid sample.
-        return positions[pos, particle_index].copy(), True
+    try:
+        names = [
+            item.decode("utf-8") if isinstance(item, bytes) else item
+            for item in ids.tolist()
+        ]
+    except UnicodeError as exc:
+        raise ValueError("particle_ids must contain valid UTF-8 strings") from exc
 
-    # Need a right neighbour for interpolation.
-    if pos + 1 > last_valid:
-        # Beyond the last valid sample; do not fabricate.
-        return nan_position, False
+    if any(not name.strip() for name in names) or len(set(names)) != len(names):
+        raise ValueError("particle_ids must be unique and non-empty")
 
-    t_left = float(timestamps[pos])
-    t_right = float(timestamps[pos + 1])
-    frac = (query_time - t_left) / (t_right - t_left)
-    pos_left = positions[pos, particle_index]
-    pos_right = positions[pos + 1, particle_index]
-    position = pos_left + frac * (pos_right - pos_left)
-    return position.astype(np.float64, copy=True), True
+    return times, positions, mask, names
 
 
 def sample_particle_positions(
@@ -325,159 +193,55 @@ def sample_particle_positions(
     particle_ids: list[str],
     sim_times: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Sample particle positions at requested physical simulation times.
+    """Linearly interpolate valid particle positions at physical times.
 
-    Parameters
-    ----------
-    dataset:
-        Loaded :class:`SimulationDataset` containing trajectory arrays
-        (``positions``, ``validity_mask``, ``particle_ids``, ``timestamps``).
-    particle_ids:
-        Stable identifiers of the particles to sample, in the requested
-        output order. Every id must exist in the dataset.
-    sim_times:
-        Physical simulation times in seconds, shape ``(Q,)``. Must be
-        one-dimensional and finite.
-
-    Returns
-    -------
-    tuple of np.ndarray
-        ``(positions, validity)`` where:
-        * ``positions`` has shape ``(Q, len(particle_ids), 2)`` in metres.
-          Invalid entries are NaN.
-        * ``validity`` has shape ``(Q, len(particle_ids))`` and is ``True``
-          where a valid interpolated position exists.
-
-    Raises
-    ------
-    ValueError
-        If the dataset lacks required trajectory arrays, has malformed
-        validity (e.g. a terminated particle reactivating), if any requested
-        particle id is unknown, or if ``sim_times`` is invalid.
-
-    Notes
-    -----
-    The original NPZ arrays are never modified. Interpolation only occurs
-    between valid neighbouring samples; terminated particles and out-of-range
-    times yield NaN positions with ``validity = False``. Only NumPy is used,
-    so this is safe for a Blender-bundled Python environment.
+    Returns a (Q, P, 2) array in metres and a (Q, P) boolean mask. A particle
+    has no position past its last valid simulation sample; it is never
+    extrapolated through the black hole cutoff.
     """
-    arrays = dataset.arrays
+    times, positions, mask, names = _trajectory_arrays(dataset)
+    indices = {name: i for i, name in enumerate(names)}
+    unknown = [name for name in particle_ids if name not in indices]
+    if unknown:
+        raise ValueError(f"unknown particle ids: {unknown}")
 
-    required = (
-        _TIMESTAMPS_KEY,
-        _POSITIONS_KEY,
-        _VALIDITY_MASK_KEY,
-        _PARTICLE_IDS_KEY,
-    )
-    missing = [name for name in required if name not in arrays]
-    if missing:
-        raise ValueError(f"dataset missing required trajectory arrays: {missing}")
+    try:
+        query = np.asarray(sim_times, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sim_times must contain numeric values") from exc
+    if query.ndim != 1 or not np.all(np.isfinite(query)):
+        raise ValueError("sim_times must be a finite one-dimensional array")
 
-    timestamps = arrays[_TIMESTAMPS_KEY]
-    positions = arrays[_POSITIONS_KEY]
-    validity_mask = arrays[_VALIDITY_MASK_KEY]
-    dataset_ids = arrays[_PARTICLE_IDS_KEY]
+    result = np.full((query.size, len(particle_ids), 2), np.nan)
+    valid = np.zeros((query.size, len(particle_ids)), dtype=bool)
+    if query.size == 0 or not particle_ids:
+        return result, valid
 
-    # --- Validate timestamps ---
-    if timestamps.ndim != 1:
-        raise ValueError("timestamps must be one-dimensional")
-    if timestamps.size < 2:
-        raise ValueError("timestamps must contain at least two samples")
-    if not np.all(np.isfinite(timestamps)):
-        raise ValueError("timestamps must contain only finite values")
-    if not np.all(np.diff(timestamps) > 0.0):
-        raise ValueError("timestamps must be strictly increasing")
+    # Search the time axis once, regardless of how many particles are requested.
+    left = np.searchsorted(times, query, side="right") - 1
+    bounded = (query >= times[0]) & (query <= times[-1])
+    left = np.clip(left, 0, times.size - 1)
+    exact = query == times[left]
 
-    n_times = int(timestamps.size)
+    for output_index, name in enumerate(particle_ids):
+        source_index = indices[name]
+        last_valid = np.count_nonzero(mask[:, source_index]) - 1
+        if last_valid < 0:
+            continue
 
-    # --- Validate positions shape (T, N, 2) ---
-    if positions.ndim != 3 or positions.shape[2] != 2:
-        raise ValueError(
-            f"array {_POSITIONS_KEY!r} must have shape (T, N, 2), "
-            f"got {positions.shape}"
-        )
-    if positions.shape[0] != n_times:
-        raise ValueError(
-            f"array {_POSITIONS_KEY!r} first dimension must match "
-            "timestamps length"
-        )
+        on_sample = bounded & exact & (left <= last_valid)
+        result[on_sample, output_index] = positions[left[on_sample], source_index]
+        valid[on_sample, output_index] = True
 
-    # --- Validate validity_mask: boolean, shape (T, N), no reactivation ---
-    if validity_mask.dtype.kind != "b":
-        raise ValueError("validity_mask must have boolean dtype")
-    if validity_mask.ndim != 2:
-        raise ValueError(
-            f"array {_VALIDITY_MASK_KEY!r} must be two-dimensional, "
-            f"got {validity_mask.ndim}D"
-        )
-    if validity_mask.shape[0] != n_times:
-        raise ValueError(
-            f"array {_VALIDITY_MASK_KEY!r} first dimension must match "
-            "timestamps length"
-        )
-    n_particles = int(validity_mask.shape[1])
-    if positions.shape[1] != n_particles:
-        raise ValueError(
-            f"array {_POSITIONS_KEY!r} particle dimension must match "
-            f"{_VALIDITY_MASK_KEY!r}"
-        )
+        between = bounded & ~exact & (left < last_valid)
+        if not np.any(between):
+            continue
 
-    # Reject validity histories that allow a terminated particle to reactivate.
-    # Once a column goes False it must stay False (contiguous valid prefix).
-    if n_particles > 0 and n_times > 1:
-        transitions = np.diff(validity_mask.astype(np.int8), axis=0)
-        # A -1 -> +1 transition (False to True) is reactivation.
-        if np.any(transitions < 0) and np.any(transitions > 0):
-            raise ValueError(
-                "validity_mask must not allow a terminated particle to "
-                "reactivate (each particle column must be a contiguous "
-                "valid prefix)"
-            )
+        i = left[between]
+        fraction = (query[between] - times[i]) / (times[i + 1] - times[i])
+        before = positions[i, source_index]
+        after = positions[i + 1, source_index]
+        result[between, output_index] = before + fraction[:, None] * (after - before)
+        valid[between, output_index] = True
 
-    # --- Validate particle_ids ---
-    if dataset_ids.ndim != 1 or dataset_ids.size != n_particles:
-        raise ValueError(
-            f"array {_PARTICLE_IDS_KEY!r} must be one-dimensional with "
-            f"length {n_particles}"
-        )
-
-    # Resolve requested particle indices.
-    id_to_index = {str(pid): idx for idx, pid in enumerate(dataset_ids.tolist())}
-    missing_ids = [pid for pid in particle_ids if pid not in id_to_index]
-    if missing_ids:
-        raise ValueError(
-            f"unknown particle ids: {missing_ids}. Known ids: "
-            f"{dataset_ids.tolist()}"
-        )
-    particle_indices = [id_to_index[pid] for pid in particle_ids]
-
-    # --- Validate sim_times ---
-    sim_times = np.asarray(sim_times, dtype=np.float64)
-    if sim_times.ndim != 1:
-        raise ValueError("sim_times must be one-dimensional")
-    if not np.all(np.isfinite(sim_times)):
-        raise ValueError("sim_times must contain only finite values")
-
-    n_queries = int(sim_times.size)
-    n_requested = len(particle_indices)
-
-    positions_out = np.full(
-        (n_queries, n_requested, 2), np.nan, dtype=np.float64
-    )
-    validity_out = np.zeros((n_queries, n_requested), dtype=bool)
-
-    for q in range(n_queries):
-        query_time = float(sim_times[q])
-        for p_idx, particle_index in enumerate(particle_indices):
-            position, is_valid = _interpolate_at_time(
-                timestamps,
-                positions,
-                validity_mask,
-                particle_index,
-                query_time,
-            )
-            positions_out[q, p_idx] = position
-            validity_out[q, p_idx] = is_valid
-
-    return positions_out, validity_out
+    return result, valid
