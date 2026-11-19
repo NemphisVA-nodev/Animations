@@ -54,15 +54,6 @@ DEFAULT_INITIAL_RADIUS_M = 1.0e8  # 100,000 km
 DEFAULT_DURATION_S = 50.0
 DEFAULT_NUM_STEPS = 500
 
-MODEL_NAME = "newtonian_test_particle"
-MODEL_LIMITATIONS = (
-    "Newtonian point-mass test-particle integration. Does not model general "
-    "relativistic effects near or inside the Schwarzschild radius. The cutoff "
-    "radius is placed outside the Schwarzschild radius; trajectories are not "
-    "simulated at or inside the horizon."
-)
-
-
 def _build_black_hole(mass_kg: float, cutoff_radius_m: float) -> BlackHole:
     return BlackHole(
         mass_kg=mass_kg,
@@ -111,10 +102,14 @@ def _run_scenario(
     print(f"  terminated={terminated}/{cloud.count}")
     print(f"  solver_success={result.solver_success}")
     radial = radial_tidal_acceleration(result, object_length_m)
-    print(
-        f"  radial tidal range: "
-        f"{np.nanmin(radial):.3e} to {np.nanmax(radial):.3e} m/s^2"
-    )
+    finite_radial = radial[np.isfinite(radial)]
+    if finite_radial.size:
+        print(
+            f"  radial tidal range: "
+            f"{finite_radial.min():.3e} to {finite_radial.max():.3e} m/s^2"
+        )
+    else:
+        print("  radial tidal range: unavailable (no valid cloud centre)")
 
 
 def scenario_a_radial_infall(args: argparse.Namespace) -> None:
@@ -140,9 +135,8 @@ def scenario_a_radial_infall(args: argparse.Namespace) -> None:
         )
     cloud = ParticleCloud(particles=particles)
 
-    output_stem = Path(args.output).with_name(
-        Path(args.output).stem + "_radial_infall"
-    )
+    output = Path(args.output)
+    output_stem = output.with_name(output.name + "_radial_infall")
     _run_scenario(
         black_hole,
         cloud,
@@ -165,9 +159,8 @@ def scenario_b_tidal_cloud(args: argparse.Namespace) -> None:
         common_velocity=(0.0, 0.0),
         id_prefix="grid",
     )
-    output_stem = Path(args.output).with_name(
-        Path(args.output).stem + "_tidal_cloud"
-    )
+    output = Path(args.output)
+    output_stem = output.with_name(output.name + "_tidal_cloud")
     _run_scenario(
         black_hole,
         cloud,
