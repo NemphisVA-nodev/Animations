@@ -105,22 +105,23 @@ following Python-side (no Blender) foundation has been implemented and tested:
 validated trajectory datasets and creates keyframed particle animations with
 linear movement, step-wise visibility and a configurable playback frame rate.
 This is a technical preview, not a physically realistic black-hole rendering.
-The basic fixed camera is best suited to smaller trajectories; larger scales
-may require adjusting the camera framing in Blender.
+The basic fixed camera is best suited to smaller trajectories. The example uses
+a smaller visual scale so the default generator's particles remain in view;
+larger scenes may require adjusting the camera framing in Blender.
 
 To build a Blender preview, first generate a trajectory dataset, then run
 from the repository root (replace `blender` with your Blender executable path):
 
 ```bash
 uv run python scripts/generate_black_hole_trajectories.py radial-infall --output outputs/preview
-blender --background --python-exit-code 1 --python blender/preview_scene.py -- --dataset outputs/preview_radial_infall --fps 24 --output outputs/first_blender_preview.blend
+blender --background --python-exit-code 1 --python blender/preview_scene.py -- --dataset outputs/preview_radial_infall --scale 5e-8 --fps 24 --output outputs/first_blender_preview.blend
 ```
 
 A separate Blender smoke test validates the preview scene and keyframes
 without needing pytest in Blender's bundled Python:
 
 ```bash
-blender --background --python-exit-code 1 --python blender/tests/test_blender_integration.py -- --dataset outputs/preview_radial_infall --fps 24 --output outputs/integration_test.blend
+blender --background --python-exit-code 1 --python blender/tests/test_blender_integration.py -- --dataset outputs/preview_radial_infall --scale 5e-8 --fps 24 --output outputs/integration_test.blend
 ```
 
 **Not yet implemented:** cinematic rendering, exporting/FFmpeg video encoding,
