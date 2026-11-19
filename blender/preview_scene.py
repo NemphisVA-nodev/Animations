@@ -39,6 +39,10 @@ from blender.animator import (  # noqa: E402
     animate_trajectory_file,
     require_bpy,
 )
+from blender.output_paths import (  # noqa: E402
+    default_blend_output,
+    next_available_blend_path,
+)
 
 __all__ = [
     "build_preview_scene",
@@ -175,8 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional hold duration in seconds appended after active frames.",
     )
     parser.add_argument(
-        "--output", default="outputs/first_blender_preview.blend",
-        help="Output .blend file path (default: outputs/first_blender_preview.blend).",
+        "--output", default=None,
+        help="Output .blend path (default: dataset name + preview + FPS).",
     )
 
     if argv is None:
@@ -195,11 +199,15 @@ def main(argv: list[str] | None = None) -> int:
         hold_s=args.hold,
     )
 
-    # Save the generated Blender scene.
-    output_path = Path(args.output).resolve()
+    # Preserve previous exports, even when --output is reused.
+    requested_path = args.output or default_blend_output(
+        args.dataset, args.fps, kind="preview"
+    )
+    output_path = next_available_blend_path(requested_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
     bpy.ops.wm.save_as_mainfile(filepath=str(output_path))
+    if not output_path.is_file():
+        raise RuntimeError(f"Blender did not save the scene to {output_path}")
 
     print(f"Preview scene built for dataset: {args.dataset}")
     print(f"Saved Blender scene: {output_path}")

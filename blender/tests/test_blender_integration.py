@@ -9,7 +9,7 @@ This script runs inside Blender 5.3 and verifies more than process termination:
 * Visibility changes are correctly animated.
 * Scene FPS and frame range are correct, including fractional FPS.
 * A second import removes stale preview objects.
-* The generated .blend file can be saved.
+* The verified .blend file is saved under a unique filename.
 
 Run inside Blender::
 
@@ -45,6 +45,10 @@ from blender.animator import (  # noqa: E402
     SCALE_DEFAULT,
     animate_trajectory_file,
     require_bpy,
+)
+from blender.output_paths import (  # noqa: E402
+    default_blend_output,
+    next_available_blend_path,
 )
 
 __all__ = [
@@ -165,7 +169,7 @@ def run_integration_test(
     duration_s:
         Active preview duration in seconds.
     output_blend:
-        Optional path to save the .blend file for reopen verification.
+        Optional path to save the .blend file after the checks.
     """
     require_bpy()
     dataset_path = Path(dataset_path)
@@ -258,17 +262,20 @@ def run_integration_test(
 
     bpy.context.scene.frame_set(1)
 
-    # --- Verify .blend save ---
+    # --- Save the verified .blend without overwriting an earlier run ---
+    output_path = None
     if output_blend is not None:
-        output_path = Path(output_blend).resolve()
+        output_path = next_available_blend_path(output_blend)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         bpy.ops.wm.save_as_mainfile(filepath=str(output_path))
-        assert output_path.exists(), f"failed to save {output_path}"
+        assert output_path.is_file(), f"failed to save {output_path}"
 
     print("Integration test PASSED")
     print(f"  particles: {particle_ids}")
     print(f"  frames: {mapping.total_frames} (fps={fps})")
-    print(f"  collection: Animations_Preview")
+    print("  collection: Animations_Preview")
+    if output_path is not None:
+        print(f"  saved: {output_path}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -293,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--output", default=None,
-        help="Optional .blend output path for save/reopen verification.",
+        help="Output .blend path (default: dataset name + integration + FPS).",
     )
     parser.add_argument(
         "--blender-exe", default=None,
@@ -319,7 +326,9 @@ def main(argv: list[str] | None = None) -> int:
         scale=args.scale,
         fps=args.fps,
         duration_s=args.duration,
-        output_blend=args.output,
+        output_blend=args.output or default_blend_output(
+            args.dataset, args.fps, kind="integration"
+        ),
     )
     return 0
 
