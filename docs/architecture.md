@@ -64,4 +64,12 @@ Animations are pre-rendered into video files (MP4/H.264) rather than rendered li
 
 ## Status
 
-This document describes the planned architecture. The physics, rendering, and exporting engines are not yet implemented. No claim is made that any of the described functionality already works.
+The physics engine is partially implemented: Newtonian tidal acceleration
+(`core/physics/tidal.py`), an idealized black hole model
+(`core/physics/black_hole.py`), test-particle clouds
+(`core/physics/particles.py`), numerical integration with event-based cutoff
+(`core/physics/integration.py`), and tidal measurements
+(`core.physics.measurements`) are implemented and tested. The rendering engine
+and exporting/FFmpeg video encoding are not yet implemented. No physics
+simulations are rendered to video yet. No claim is made that any of the
+described cinematic functionality already works.

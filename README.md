@@ -72,17 +72,32 @@ Animations/
 project architecture, package structure, and test suite are in place. The
 following Python-side (no Blender) foundation has been implemented and tested:
 
+- Development environment: `uv`-managed local `.venv`, NumPy, SciPy, Matplotlib,
+  Pillow, and pytest (119 passing tests).
+- Package structure: `core/` (physics, rendering, exporting, simulation),
+  `animations/` (spaghettification, lensing, orbits, chaos), `tests/`, `docs/`,
+  `assets/`, `outputs/`, `scripts/`.
 - Newtonian tidal acceleration physics (`core/physics/tidal.py`) in SI units,
   frame-rate independent.
+- Black hole model (`core/physics/black_hole.py`): mass, position, Schwarzschild
+  radius `r_s = 2GM/c^2`, vector gravitational acceleration, configurable
+  integration cutoff outside `r_s`.
+- Test-particle model (`core.physics.particles`): deterministic clouds (radial,
+  transverse, grid, ring) with validation.
+- Numerical integration (`core.physics.integration`): SciPy `solve_ivp` (DOP853),
+  event-based cutoff termination, per-particle validity, reproducible output.
+- Tidal deformation measurements (`core.physics.measurements`).
 - Renderer-independent simulation data contracts: JSON metadata + compressed
-  NPZ arrays with versioned schema and validation (`core/simulation/`).
-- Presentation timeline model distinguishing simulation time, playback time,
-  and presentation time (`core/timeline.py`).
-- Transition specification for scene-to-scene visual alignment
-  (`core/transitions.py`).
-- Deterministic example tidal-acceleration dataset generator
-  (`scripts/generate_tidal_dataset.py`) with output in `outputs/`.
-- Test suite covering physics, data format, timeline, and transitions.
+  NPZ arrays, versioned schema `1.0.0`, extended for multi-particle
+  trajectories with an explicit validity mask (readable with `json` + `numpy`).
+- Presentation timeline (`core/timeline.py`) and transition
+  (`core/transitions.py`) specifications.
+- Deterministic example dataset generators:
+  `scripts/generate_tidal_dataset.py` and
+  `scripts/generate_black_hole_trajectories.py` (radial-infall + tidal-cloud
+  presets).
+- Documentation: storyboard, data format, transition architecture, black hole
+  simulation, and spaghettification physics.
 
 **Not yet implemented:** the rendering engine, exporting/FFmpeg video
 encoding, graphical user interface, animation demos, and Blender integration.

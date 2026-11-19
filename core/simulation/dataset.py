@@ -17,6 +17,8 @@ from typing import Any, TypedDict
 
 import numpy as np
 
+from ..physics.integration import TrajectoryResult
+
 SCHEMA_VERSION = "1.0.0"
 
 REQUIRED_METADATA_KEYS = (
@@ -41,6 +43,26 @@ ALLOWED_UNITS = {
     "mass": "kg",
     "length": "m",
 }
+
+# Arrays that may be multi-dimensional (T, N, D) and contain NaN for
+# terminated particles when the nonfinite policy is "masked".
+TRAJECTORY_ARRAYS = ("positions", "velocities")
+NONFINITE_POLICY_MASKED = "masked"
+NONFINITE_POLICY_KEY = "nonfinite_policy"
+VALIDITY_MASK_ARRAY = "validity_mask"
+PARTICLE_IDS_ARRAY = "particle_ids"
+
+# Trajectory-specific metadata keys (optional; only validated when present).
+TRAJECTORY_METADATA_KEYS = (
+    "black_hole_mass_kg",
+    "schwarzschild_radius_m",
+    "integration_cutoff_radius_m",
+    "numerical_method",
+    "solver_rtol",
+    "solver_atol",
+    "initial_conditions",
+    "termination_status",
+)
 
 
 class SimulationMetadata(TypedDict, total=False):
@@ -139,17 +161,109 @@ def validate_dataset(dataset: SimulationDataset) -> None:
     if not isinstance(arrays, dict):
         raise ValueError("arrays must be a dictionary")
 
+    nonfinite_policy = metadata.get(NONFINITE_POLICY_KEY)
+    masked = nonfinite_policy == NONFINITE_POLICY_MASKED
+
+    # Trajectory consistency: validity_mask and particle_ids must be present
+    # together when any 3-D trajectory array is present. A 1-D array named
+    # "positions" or "velocities" is treated as a regular legacy array.
+    has_trajectory = any(
+        name in TRAJECTORY_ARRAYS and arrays[name].ndim == 3 for name in arrays
+    )
+    if has_trajectory:
+        if VALIDITY_MASK_ARRAY not in arrays:
+            raise ValueError(
+                f"trajectory arrays require {VALIDITY_MASK_ARRAY!r}"
+            )
+        if PARTICLE_IDS_ARRAY not in arrays:
+            raise ValueError(
+                f"trajectory arrays require {PARTICLE_IDS_ARRAY!r}"
+            )
+
     lengths: list[int] = []
     for name, value in arrays.items():
         if not isinstance(value, np.ndarray):
             raise ValueError(f"array {name!r} is not a NumPy array")
         if value.size == 0:
             raise ValueError(f"array {name!r} is empty")
-        if not np.all(np.isfinite(value)):
-            raise ValueError(f"array {name!r} contains non-finite values")
-        if value.ndim != 1:
-            raise ValueError(f"array {name!r} must be one-dimensional, got {value.ndim}D")
-        lengths.append(value.size)
+
+        is_trajectory_candidate = name in TRAJECTORY_ARRAYS
+        is_masked_trajectory = (
+            is_trajectory_candidate and masked and value.ndim == 3
+        )
+
+        # Dimensionality rules.
+        if name == "timestamps":
+            if value.ndim != 1:
+                raise ValueError(
+                    f"array {name!r} must be one-dimensional, got {value.ndim}D"
+                )
+        elif name == VALIDITY_MASK_ARRAY:
+            if value.ndim != 2:
+                raise ValueError(
+                    f"array {name!r} must be two-dimensional, got {value.ndim}D"
+                )
+        elif value.dtype.kind == "b":
+            # Boolean masks (e.g. validity_mask) are two-dimensional (T, N).
+            if value.ndim != 2:
+                raise ValueError(
+                    f"array {name!r} must be two-dimensional, got {value.ndim}D"
+                )
+        elif is_masked_trajectory:
+            if value.ndim != 3:
+                raise ValueError(
+                    f"array {name!r} must have shape (T, N, D), got {value.ndim}D"
+                )
+        elif value.ndim != 1:
+            raise ValueError(
+                f"array {name!r} must be one-dimensional, got {value.ndim}D"
+            )
+
+        # Finiteness rules.
+        if name == "timestamps":
+            if not np.all(np.isfinite(value)):
+                raise ValueError(f"array {name!r} contains non-finite values")
+        elif name == PARTICLE_IDS_ARRAY:
+            # String identifiers are not subject to numeric finiteness checks.
+            pass
+        elif is_masked_trajectory:
+            # NaN is permitted only where validity_mask is False; every valid
+            # entry must be finite. Never fabricate plausible-looking data.
+            validity = arrays.get(VALIDITY_MASK_ARRAY)
+            if validity is None or validity.shape != value.shape[:2]:
+                raise ValueError(
+                    f"{VALIDITY_MASK_ARRAY!r} must match the (T, N) shape of "
+                    f"{name!r}"
+                )
+            valid_values = value[validity]
+            if valid_values.size > 0 and not np.all(np.isfinite(valid_values)):
+                raise ValueError(
+                    f"array {name!r} contains non-finite values where "
+                    f"{VALIDITY_MASK_ARRAY!r} is True"
+                )
+            invalid_values = value[~validity]
+            if invalid_values.size > 0 and not np.all(
+                np.isnan(invalid_values)
+            ):
+                raise ValueError(
+                    f"array {name!r} must be NaN where "
+                    f"{VALIDITY_MASK_ARRAY!r} is False"
+                )
+        else:
+            if not np.all(np.isfinite(value)):
+                raise ValueError(f"array {name!r} contains non-finite values")
+
+        if name == PARTICLE_IDS_ARRAY:
+            if value.ndim != 1:
+                raise ValueError(
+                    f"array {name!r} must be one-dimensional, got {value.ndim}D"
+                )
+            if value.dtype.kind not in ("U", "S", "O"):
+                raise ValueError(f"array {name!r} must be a string array")
+            # String identifiers have length N, not T; exclude from the
+            # shared-length check (validated separately above).
+        elif value.ndim == 1:
+            lengths.append(value.size)
 
     # All multi-element 1D arrays must share a length so trajectories align.
     multi_lengths = [n for n in lengths if n > 1]
@@ -159,11 +273,153 @@ def validate_dataset(dataset: SimulationDataset) -> None:
             "share the same length"
         )
 
+    # Trajectory dimension consistency.
+    if has_trajectory:
+        timestamps = arrays["timestamps"]
+        validity = arrays[VALIDITY_MASK_ARRAY]
+        particle_ids = arrays[PARTICLE_IDS_ARRAY]
+        n_times = int(timestamps.size)
+        n_particles = int(particle_ids.size)
+        for name in TRAJECTORY_ARRAYS:
+            if name in arrays and arrays[name].ndim == 3:
+                arr = arrays[name]
+                if arr.shape[0] != n_times or arr.shape[1] != n_particles:
+                    raise ValueError(
+                        f"array {name!r} shape {arr.shape} must be "
+                        f"(T={n_times}, N={n_particles}, D)"
+                    )
+        if validity.shape != (n_times, n_particles):
+            raise ValueError(
+                f"{VALIDITY_MASK_ARRAY!r} shape {validity.shape} must be "
+                f"(T={n_times}, N={n_particles})"
+            )
+
     # Timestamps, when present, must be strictly increasing.
     if "timestamps" in arrays:
         timestamps = arrays["timestamps"]
         if timestamps.size > 1 and not np.all(np.diff(timestamps) > 0.0):
             raise ValueError("timestamps must be strictly increasing")
+
+
+def trajectory_to_dataset(
+    result: TrajectoryResult,
+    simulation_id: str,
+    *,
+    simulation_type: str = "black_hole_trajectory",
+    model: str = "newtonian_test_particle",
+    model_limitations: str = (
+        "Newtonian point-mass test-particle integration. Does not model "
+        "general relativistic effects near or inside the Schwarzschild "
+        "radius. Terminated particles are marked invalid and their trailing "
+        "samples are NaN; no data is fabricated after termination."
+    ),
+    notes: str = "",
+) -> SimulationDataset:
+    """Convert a :class:`TrajectoryResult` into a :class:`SimulationDataset`.
+
+    The produced dataset uses the ``nonfinite_policy = "masked"`` convention:
+    ``positions`` and ``velocities`` are ``(T, N, 2)`` arrays that may contain
+    NaN where the ``validity_mask`` is False. All other arrays remain finite
+    and 1-D. This is backward compatible with the existing validator because
+    the mask policy is declared explicitly in metadata.
+
+    Parameters
+    ----------
+    result:
+        The integration result to export.
+    simulation_id:
+        Unique simulation identifier.
+    simulation_type:
+        Type label stored in metadata.
+    model:
+        Physical model name stored in metadata.
+    model_limitations:
+        Honest statement of model limitations.
+    notes:
+        Free-form notes.
+
+    Returns
+    -------
+    SimulationDataset
+        Dataset ready for :func:`save_dataset`.
+    """
+    black_hole = result.black_hole
+    timestamps = result.timestamps
+    positions = result.positions
+    velocities = result.velocities
+    validity = result.validity_mask
+    particle_ids = np.array(result.particle_ids)  # fixed-width unicode array
+
+    arrays = {
+        "timestamps": timestamps,
+        "positions": positions,
+        "velocities": velocities,
+        VALIDITY_MASK_ARRAY: validity,
+        PARTICLE_IDS_ARRAY: particle_ids,
+    }
+
+    units = {
+        "time": "s",
+        "position": "m",
+        "velocity": "m/s",
+        "mass": "kg",
+        "length": "m",
+    }
+
+    reference_frame = {
+        "origin": "black hole centre",
+        "radial_axis": "positive outward from the black hole",
+        "plane": "2D Cartesian (x, y)",
+        "gravity_direction": "toward the black hole centre",
+    }
+
+    physical_parameters = {
+        "black_hole_mass_kg": black_hole.mass_kg,
+        "schwarzschild_radius_m": black_hole.schwarzschild_radius_m,
+        "integration_cutoff_radius_m": black_hole.cutoff_radius_m,
+        "n_particles": int(result.positions.shape[1]),
+        "n_timestamps": int(result.timestamps.size),
+        "duration_s": float(result.timestamps[-1] - result.timestamps[0]),
+    }
+
+    metadata: SimulationMetadata = SimulationMetadata(
+        schema_version=SCHEMA_VERSION,
+        simulation_id=simulation_id,
+        simulation_type=simulation_type,
+        model=model,
+        model_limitations=model_limitations,
+        units=units,
+        reference_frame=reference_frame,
+        physical_parameters=physical_parameters,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        array_sources={},
+        notes=notes,
+        **{
+            NONFINITE_POLICY_KEY: NONFINITE_POLICY_MASKED,
+            "black_hole_mass_kg": black_hole.mass_kg,
+            "schwarzschild_radius_m": black_hole.schwarzschild_radius_m,
+            "integration_cutoff_radius_m": black_hole.cutoff_radius_m,
+            "numerical_method": "DOP853",
+            "solver_success": bool(result.solver_success),
+            "solver_message": str(result.solver_message),
+            "termination_times_s": result.termination_times,
+            "initial_conditions": {
+                "particle_ids": list(result.particle_ids),
+                "initial_positions_m": result.positions[0].tolist(),
+                "initial_velocities_m_per_s": result.velocities[0].tolist(),
+            },
+            "termination_status": [
+                (
+                    "terminated_at_cutoff"
+                    if t is not None
+                    else "survived_duration"
+                )
+                for t in result.termination_times
+            ],
+        },
+    )
+
+    return SimulationDataset(metadata=metadata, arrays=arrays)
 
 
 def save_dataset(

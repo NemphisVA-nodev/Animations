@@ -1,0 +1,16 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "mcp": {
+    "blender": {
+      "type": "local",
+      "command": [
+        "cmd",
+        "/c",
+        "uvx",
+        "mcp-for-blender"
+      ],
+      "enabled": true,
+      "timeout": 30000
+    }
+  }
+}
