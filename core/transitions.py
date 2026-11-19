@@ -12,6 +12,7 @@ exporting layer and to any future Blender integration.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import isfinite
 
 ALLOWED_TRANSITION_TYPES = {
     "cut",
@@ -74,10 +75,10 @@ class Transition:
                 f"unknown transition type {self.transition_type!r}; "
                 f"allowed: {sorted(ALLOWED_TRANSITION_TYPES)}"
             )
-        if self.duration_s < 0.0:
-            raise ValueError("duration_s must be non-negative")
-        if self.overlap_s < 0.0:
-            raise ValueError("overlap_s must be non-negative")
+        if not isfinite(self.duration_s) or self.duration_s < 0.0:
+            raise ValueError("duration_s must be finite and non-negative")
+        if not isfinite(self.overlap_s) or self.overlap_s < 0.0:
+            raise ValueError("overlap_s must be finite and non-negative")
         if not self.start_anchor.strip():
             raise ValueError("start_anchor must be non-empty")
         if not self.end_anchor.strip():
@@ -94,7 +95,14 @@ class TransitionPlan:
 
     transitions: list[Transition] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        ids = [transition.transition_id for transition in self.transitions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("transition IDs must be unique")
+
     def add(self, transition: Transition) -> None:
+        if transition.transition_id in self.transition_ids():
+            raise ValueError(f"duplicate transition ID: {transition.transition_id}")
         self.transitions.append(transition)
 
     def validate_against(self, scene_ids: set[str]) -> None:
