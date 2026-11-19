@@ -12,6 +12,7 @@ exporting layer and to any future Blender integration.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import isfinite
 
 ALLOWED_TRANSITION_TYPES = {
     "cut",
@@ -74,10 +75,12 @@ class Transition:
                 f"unknown transition type {self.transition_type!r}; "
                 f"allowed: {sorted(ALLOWED_TRANSITION_TYPES)}"
             )
-        if self.duration_s < 0.0:
-            raise ValueError("duration_s must be non-negative")
-        if self.overlap_s < 0.0:
-            raise ValueError("overlap_s must be non-negative")
+        if not isfinite(self.duration_s) or self.duration_s < 0.0:
+            raise ValueError("duration_s must be finite and non-negative")
+        if not isfinite(self.overlap_s) or self.overlap_s < 0.0:
+            raise ValueError("overlap_s must be finite and non-negative")
+        if self.overlap_s > self.duration_s:
+            raise ValueError("overlap_s cannot exceed duration_s")
         if not self.start_anchor.strip():
             raise ValueError("start_anchor must be non-empty")
         if not self.end_anchor.strip():
@@ -95,11 +98,17 @@ class TransitionPlan:
     transitions: list[Transition] = field(default_factory=list)
 
     def add(self, transition: Transition) -> None:
+        if transition.transition_id in self.transition_ids():
+            raise ValueError(f"duplicate transition_id: {transition.transition_id}")
         self.transitions.append(transition)
 
     def validate_against(self, scene_ids: set[str]) -> None:
-        """Ensure every transition references known start and end scenes."""
+        """Check transition IDs and scene references."""
+        seen: set[str] = set()
         for transition in self.transitions:
+            if transition.transition_id in seen:
+                raise ValueError(f"duplicate transition_id: {transition.transition_id}")
+            seen.add(transition.transition_id)
             if transition.start_scene not in scene_ids:
                 raise ValueError(
                     f"transition {transition.transition_id} references "
