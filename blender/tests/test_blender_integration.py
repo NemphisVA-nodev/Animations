@@ -206,6 +206,7 @@ def run_integration_test(
     blender_positions = metres_to_blender(positions, scale)
 
     # Frame 1 (Python index 0) should match the first sampled position.
+    bpy.context.scene.frame_set(1)
     _verify_positions_match_sampled(
         particle_ids,
         [tuple(blender_positions[0, i]) for i in range(len(particle_ids))],

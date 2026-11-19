@@ -180,6 +180,12 @@ class Animator:
         mapping = build_frame_mapping(self.spec)
         all_sim_times = mapping.all_sim_times_s  # includes holds, frozen
 
+        # Configure Blender's playback range to match the animation.
+        scene = bpy.context.scene
+        scene.frame_start = 1
+        scene.frame_end = mapping.total_frames
+
+
         # Rebuild a minimal SimulationDataset for the sampler.
         dataset = self._as_simulation_dataset()
         frame_positions, frame_valid = sample_particle_positions(
