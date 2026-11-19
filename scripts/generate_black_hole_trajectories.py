@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -35,7 +34,6 @@ from core.physics.black_hole import BlackHole  # noqa: E402
 from core.physics.integration import integrate_particles  # noqa: E402
 from core.physics.measurements import (  # noqa: E402
     radial_tidal_acceleration,
-    transverse_tidal_acceleration,
 )
 from core.physics.particles import (  # noqa: E402
     Particle,
@@ -43,10 +41,6 @@ from core.physics.particles import (  # noqa: E402
     grid_particles,
 )
 from core.simulation.dataset import (  # noqa: E402
-    NONFINITE_POLICY_KEY,
-    NONFINITE_POLICY_MASKED,
-    SimulationDataset,
-    SimulationMetadata,
     save_dataset,
     trajectory_to_dataset,
 )
@@ -103,7 +97,6 @@ def _run_scenario(
             "termination."
         ),
     )
-    dataset.metadata[NONFINITE_POLICY_KEY] = NONFINITE_POLICY_MASKED
 
     meta_path, data_path = save_dataset(dataset, output_stem)
 
