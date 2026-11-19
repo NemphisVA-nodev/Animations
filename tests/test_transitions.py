@@ -115,3 +115,35 @@ def test_transition_plan_transition_ids() -> None:
         )
     )
     assert plan.transition_ids() == ["tr_1"]
+
+
+def test_rejects_nonfinite_transition_timing() -> None:
+    fields = dict(
+        transition_id="t1", start_scene="a", end_scene="b",
+        transition_type="cut", duration_s=2.0,
+        start_anchor="exit", end_anchor="entry",
+    )
+    with pytest.raises(ValueError, match="finite"):
+        Transition(**dict(fields, duration_s=float("nan")))
+    with pytest.raises(ValueError, match="finite"):
+        Transition(**dict(fields, overlap_s=float("inf")))
+
+
+def test_rejects_overlap_longer_than_transition() -> None:
+    with pytest.raises(ValueError, match="exceed"):
+        Transition(
+            transition_id="t1", start_scene="a", end_scene="b",
+            transition_type="crossfade", duration_s=1.0,
+            start_anchor="exit", end_anchor="entry", overlap_s=2.0,
+        )
+
+
+def test_rejects_duplicate_transition_ids() -> None:
+    first = Transition("same", "a", "b", "cut", 0.0, "out", "in")
+    second = Transition("same", "b", "c", "cut", 0.0, "out", "in")
+    plan = TransitionPlan([first])
+    with pytest.raises(ValueError, match="duplicate"):
+        plan.add(second)
+    plan.transitions.append(second)
+    with pytest.raises(ValueError, match="duplicate"):
+        plan.validate_against({"a", "b", "c"})
