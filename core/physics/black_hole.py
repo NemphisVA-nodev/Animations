@@ -37,7 +37,7 @@ class BlackHole:
     def __post_init__(self) -> None:
         if not np.isfinite(self.mass_kg) or self.mass_kg <= 0.0:
             raise ValueError("mass_kg must be a positive finite value")
-        pos = np.asarray(self.position, dtype=np.float64)
+        pos = np.array(self.position, dtype=np.float64, copy=True)
         if pos.shape != (2,):
             raise ValueError("position must have shape (2,)")
         if not np.all(np.isfinite(pos)):
@@ -49,6 +49,7 @@ class BlackHole:
                 "cutoff_radius_m must be greater than the Schwarzschild radius "
                 f"({self.schwarzschild_radius_m:.6e} m)"
             )
+        pos.setflags(write=False)
         object.__setattr__(self, "position", pos)
 
     @property
