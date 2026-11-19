@@ -58,6 +58,7 @@ def test_rejects_non_blend_extensions(tmp_path: Path, filename: str) -> None:
     with pytest.raises(ValueError, match=r"end in \.blend"):
         next_available_blend_path(tmp_path / filename)
 
+
 def test_render_still_paths_preserve_existing_png(tmp_path: Path) -> None:
     original = tmp_path / "cinematic_still.png"
     original.write_bytes(b"first render")

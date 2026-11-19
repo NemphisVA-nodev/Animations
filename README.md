@@ -132,8 +132,33 @@ file already exists, the script saves `my_scene_001.blend`,
 the final path, so individual versions can be opened again later. For example,
 24 FPS and 30 FPS integration runs produce distinct files automatically.
 
-**Not yet implemented:** cinematic rendering, exporting/FFmpeg video encoding,
-a graphical user interface and the other planned simulation animations.
+**Step 5C cinematic prototype (in development):** A separate Blender entry point
+adds schematic glow rings around the black-hole marker, a dark material,
+emissive particles, animated trailing curves that only reveal past calculated
+positions, and an automatically framed orthographic camera. Blender 5.3 Eevee
+provides low-cost draft previews and optional still PNG rendering. The original
+Step 5B preview remains unchanged.
+
+From the project root, with a trajectory dataset already generated:
+
+```bash
+blender --background --python-exit-code 1 --python blender/cinematic_scene.py -- --dataset outputs/preview_radial_infall_radial_infall --scale 1e-6 --fps 24 --quality draft
+```
+
+For a single PNG preview, append `--render-still`. The command saves a new
+`*_cinematic_24fps.blend` and a matching `*_still.png`; existing output
+files receive numbered suffixes rather than being replaced. Use `--quality final`
+for 1920×1080 output, or `--trail-frames 20` to extend the trail window.
+The default draft mode renders at 960×540 with a 75% resolution percentage
+to reduce load on older laptops.
+
+**Scientific disclaimer:** Particle positions and visibility are CALCULATED
+from the Newtonian dataset. The rings, glow, marker size and camera treatment
+are SCHEMATIC artistic elements. No general relativistic ray tracing,
+gravitational lensing or physical accretion dynamics are modeled here.
+
+**Not yet implemented:** video/FFmpeg export, a graphical user interface
+and the other planned simulation animations.
 No physics simulations are exported to video yet. See `docs/` for the
 planned architecture, storyboard, data format, and transition design.
 

@@ -21,8 +21,8 @@ def test_trail_freezes_during_hold_frames() -> None:
         np.ones(7, dtype=bool), tail_frames=2, active_frames=4
     )
     assert np.all(visible[1:])
-    assert np.all(ends[3:] == pytest.approx(1.0))
-    assert np.all(starts[3:] == pytest.approx(1 / 3))
+    assert np.allclose(ends[3:], 1.0)
+    assert np.allclose(starts[3:], 1 / 3)
 
 
 def test_terminated_particle_never_reappears() -> None:

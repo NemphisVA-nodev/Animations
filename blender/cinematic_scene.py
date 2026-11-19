@@ -77,16 +77,17 @@ def _visual_collection():
     # Do not touch the Step 5B particle collection.
     for obj in list(collection.objects):
         data = obj.data
-        materials = list(data.materials) if obj.type in {"MESH", "CURVE"} else []
+        object_type = obj.type
+        materials = list(data.materials) if object_type in {"MESH", "CURVE"} else []
         bpy.data.objects.remove(obj, do_unlink=True)
         if data is not None and data.users == 0:
-            if obj.type == "MESH":
+            if object_type == "MESH":
                 bpy.data.meshes.remove(data)
-            elif obj.type == "CURVE":
+            elif object_type == "CURVE":
                 bpy.data.curves.remove(data)
-            elif obj.type == "CAMERA":
+            elif object_type == "CAMERA":
                 bpy.data.cameras.remove(data)
-            elif obj.type == "LIGHT":
+            elif object_type == "LIGHT":
                 bpy.data.lights.remove(data)
         for material in materials:
             if material is not None and material.users == 0:
@@ -273,6 +274,8 @@ def build_cinematic_scene(
     require_bpy()
     if quality not in ("draft", "final"):
         raise ValueError("quality must be draft or final")
+    if isinstance(trail_frames, bool) or not isinstance(trail_frames, int) or trail_frames < 1:
+        raise ValueError("trail_frames must be a positive integer")
     data = load_trajectory(dataset_path, scale=scale)
     spec = PlaybackSpec(
         scene_id="cinematic_black_hole",
