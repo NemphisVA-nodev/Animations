@@ -161,6 +161,12 @@ def validate_dataset(dataset: SimulationDataset) -> None:
     if not isinstance(arrays, dict):
         raise ValueError("arrays must be a dictionary")
 
+    for name, value in arrays.items():
+        if not isinstance(value, np.ndarray):
+            raise ValueError(f"array {name!r} is not a NumPy array")
+        if value.size == 0:
+            raise ValueError(f"array {name!r} is empty")
+
     nonfinite_policy = metadata.get(NONFINITE_POLICY_KEY)
     if nonfinite_policy not in (None, NONFINITE_POLICY_MASKED):
         raise ValueError(f"unsupported nonfinite policy: {nonfinite_policy!r}")
@@ -251,6 +257,8 @@ def validate_dataset(dataset: SimulationDataset) -> None:
                     f"{VALIDITY_MASK_ARRAY!r} must match the (T, N) shape of "
                     f"{name!r}"
                 )
+            if value.dtype.kind not in ("f", "c"):
+                raise ValueError(f"array {name!r} must have floating-point values")
             valid_values = value[validity]
             if valid_values.size > 0 and not np.all(np.isfinite(valid_values)):
                 raise ValueError(
@@ -266,6 +274,8 @@ def validate_dataset(dataset: SimulationDataset) -> None:
                     f"{VALIDITY_MASK_ARRAY!r} is False"
                 )
         else:
+            if value.dtype.kind not in ("b", "i", "u", "f", "c"):
+                raise ValueError(f"array {name!r} must contain numeric values")
             if not np.all(np.isfinite(value)):
                 raise ValueError(f"array {name!r} contains non-finite values")
 
@@ -276,18 +286,15 @@ def validate_dataset(dataset: SimulationDataset) -> None:
                 )
             if value.dtype.kind not in ("U", "S"):
                 raise ValueError(f"array {name!r} must be a string array")
-            # String identifiers have length N, not T; exclude from the
-            # shared-length check (validated separately above).
+            ids = value.tolist()
+            if any(not item.strip() for item in ids) or len(ids) != len(set(ids)):
+                raise ValueError("particle_ids must be non-empty and unique")
         elif value.ndim == 1:
             lengths.append(value.size)
 
-    # All multi-element 1D arrays must share a length so trajectories align.
-    multi_lengths = [n for n in lengths if n > 1]
-    if multi_lengths and len(set(multi_lengths)) != 1:
-        raise ValueError(
-            "all one-dimensional arrays with more than one element must "
-            "share the same length"
-        )
+    # Only particle IDs are exempt from the common time-series length.
+    if lengths and len(set(lengths)) != 1:
+        raise ValueError("one-dimensional time-series arrays must share a length")
 
     # Trajectory dimension consistency.
     if has_trajectory:
@@ -299,10 +306,10 @@ def validate_dataset(dataset: SimulationDataset) -> None:
         for name in TRAJECTORY_ARRAYS:
             if name in arrays and arrays[name].ndim == 3:
                 arr = arrays[name]
-                if arr.shape[0] != n_times or arr.shape[1] != n_particles:
+                if arr.shape != (n_times, n_particles, 2):
                     raise ValueError(
                         f"array {name!r} shape {arr.shape} must be "
-                        f"(T={n_times}, N={n_particles}, D)"
+                        f"(T={n_times}, N={n_particles}, 2)"
                     )
         if validity.shape != (n_times, n_particles):
             raise ValueError(
@@ -467,8 +474,8 @@ def save_dataset(
         validate_dataset(dataset)
 
     stem = Path(path)
-    meta_path = stem.with_suffix(".meta.json")
-    data_path = stem.with_suffix(".data.npz")
+    meta_path = stem.with_name(stem.name + ".meta.json")
+    data_path = stem.with_name(stem.name + ".data.npz")
 
     metadata = dict(dataset.metadata)
     metadata["array_sources"] = {
@@ -505,8 +512,8 @@ def load_dataset(path: str | Path) -> SimulationDataset:
             data_stem = path.stem
         data_path = path.with_name(data_stem + ".data.npz")
     else:
-        data_path = path.with_suffix(".data.npz")
-        meta_path = path.with_suffix(".meta.json")
+        data_path = path.with_name(path.name + ".data.npz")
+        meta_path = path.with_name(path.name + ".meta.json")
 
     if not meta_path.exists():
         raise FileNotFoundError(f"metadata file not found: {meta_path}")
@@ -536,6 +543,6 @@ def metadata_only(path: str | Path) -> SimulationMetadata:
     elif path.suffix == ".json":
         meta_path = path
     else:
-        meta_path = path.with_suffix(".meta.json")
+        meta_path = path.with_name(path.name + ".meta.json")
     with open(meta_path, "r", encoding="utf-8") as handle:
         return json.load(handle)
