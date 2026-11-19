@@ -5,9 +5,10 @@ This script runs inside Blender 5.3 and verifies more than process termination:
 * The preview collection exists after import.
 * Three expected particles and the black-hole marker exist.
 * Particle animation keyframes have been created.
-* Particle movement follows the sampled simulation positions.
+* Particle positions match first, middle, and final sampled frames.
 * Visibility changes are correctly animated.
-* Scene FPS and frame range are correct.
+* Scene FPS and frame range are correct, including fractional FPS.
+* A second import removes stale preview objects.
 * The generated .blend file can be saved.
 
 Run inside Blender::
@@ -88,14 +89,14 @@ def _verify_positions_match_sampled(
     expected_positions: list[tuple[float, float, float]],
     tolerance: float = 1e-6,
 ) -> None:
-    """Verify frame-1 (Python frame 0) positions match the first sample."""
+    """Verify object locations at the currently evaluated frame."""
     for pid, expected in zip(particle_ids, expected_positions):
         obj = bpy.data.objects[pid]
         # Blender frame 1 = Python frame 0.
-        obj.location  # ensure evaluated
         actual = obj.location
         assert all(
-            abs(actual[i] - expected[i]) < tolerance for i in range(3)
+            abs(actual[i] - expected[i]) <= tolerance + 1e-6 * abs(expected[i])
+            for i in range(3)
         ), f"{pid!r}: expected {expected}, got {tuple(actual)}"
 
 
@@ -103,6 +104,7 @@ def _verify_visibility_keyframes(particle_ids: list[str]) -> None:
     """Visibility properties must have CONSTANT interpolation keyframes."""
     for pid in particle_ids:
         obj = bpy.data.objects[pid]
+        found = set()
         for layer in obj.animation_data.action.layers:
             for strip in layer.strips:
                 if strip.type != "KEYFRAME":
@@ -110,18 +112,25 @@ def _verify_visibility_keyframes(particle_ids: list[str]) -> None:
                 for channelbag in strip.channelbags:
                     for fcurve in channelbag.fcurves:
                         if fcurve.data_path in ("hide_viewport", "hide_render"):
+                            found.add(fcurve.data_path)
                             for kp in fcurve.keyframe_points:
                                 assert kp.interpolation == "CONSTANT", (
                                     f"{pid!r} {fcurve.data_path} keyframe "
                                     "not CONSTANT"
                                 )
+        assert found == {"hide_viewport", "hide_render"}, (
+            f"{pid!r}: missing visibility curves: "
+            f"{sorted({'hide_viewport', 'hide_render'} - found)}"
+        )
 
 
 def _verify_scene_settings(expected_fps: float, expected_frame_end: int) -> None:
     scene = bpy.context.scene
-    assert scene.render.fps == expected_fps, (
-        f"scene fps {scene.render.fps} != {expected_fps}"
+    effective_fps = scene.render.fps / scene.render.fps_base
+    assert abs(effective_fps - expected_fps) < 1e-5, (
+        f"scene effective fps {effective_fps} != {expected_fps}"
     )
+    assert scene.frame_start == 1, f"scene frame_start is {scene.frame_start}"
     assert scene.frame_end == expected_frame_end, (
         f"scene frame_end {scene.frame_end} != {expected_frame_end}"
     )
@@ -205,12 +214,22 @@ def run_integration_test(
     )
     blender_positions = metres_to_blender(positions, scale)
 
-    # Frame 1 (Python index 0) should match the first sampled position.
-    bpy.context.scene.frame_set(1)
-    _verify_positions_match_sampled(
-        particle_ids,
-        [tuple(blender_positions[0, i]) for i in range(len(particle_ids))],
-    )
+    # Check positions and visibility after evaluating three separate frames.
+    for frame_index in sorted({0, mapping.total_frames // 2, mapping.total_frames - 1}):
+        bpy.context.scene.frame_set(frame_index + 1)
+        active_ids = []
+        active_positions = []
+        for particle_index, pid in enumerate(particle_ids):
+            expected_valid = bool(validity[frame_index, particle_index])
+            obj = bpy.data.objects[pid]
+            assert bool(obj.hide_viewport) == (not expected_valid)
+            assert bool(obj.hide_render) == (not expected_valid)
+            if expected_valid:
+                active_ids.append(pid)
+                active_positions.append(
+                    tuple(blender_positions[frame_index, particle_index])
+                )
+        _verify_positions_match_sampled(active_ids, active_positions)
 
     # --- Verify visibility keyframes ---
     _verify_visibility_keyframes(particle_ids)
@@ -218,7 +237,20 @@ def run_integration_test(
     # --- Verify scene settings ---
     _verify_scene_settings(fps, mapping.total_frames)
 
-    # --- Verify .blend save and reopen ---
+    # Re-import with a stale preview object: only the fresh objects should remain.
+    collection = bpy.data.collections["Animations_Preview"]
+    stale = bpy.data.objects.new("Stale_Preview_Object", None)
+    collection.objects.link(stale)
+    refreshed = animate_trajectory_file(
+        dataset_path, scale=scale, fps=fps, duration_s=duration_s,
+    )
+    assert "Stale_Preview_Object" not in bpy.data.objects
+    assert set(refreshed) == set(objects)
+    assert {obj.name for obj in collection.objects} == set(refreshed)
+
+    bpy.context.scene.frame_set(1)
+
+    # --- Verify .blend save ---
     if output_blend is not None:
         output_path = Path(output_blend).resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
