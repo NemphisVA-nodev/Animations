@@ -16,6 +16,7 @@ behaviour and does not depend on the physics engine.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import isfinite
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,15 @@ class SceneTimeline:
     def __post_init__(self) -> None:
         if not self.scene_id.strip():
             raise ValueError("scene_id must be non-empty")
+        for name, value in (
+            ("duration_s", self.duration_s),
+            ("start_sim_time_s", self.start_sim_time_s),
+            ("end_sim_time_s", self.end_sim_time_s),
+            ("playback_speed", self.playback_speed),
+            ("hold_s", self.hold_s),
+        ):
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
         if self.duration_s <= 0.0:
             raise ValueError("duration_s must be positive")
         if self.end_sim_time_s < self.start_sim_time_s:

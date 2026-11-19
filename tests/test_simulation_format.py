@@ -196,3 +196,60 @@ def test_rejects_nonboolean_validity_mask() -> None:
     }
     with pytest.raises(ValueError, match="boolean"):
         validate_dataset(SimulationDataset(metadata=metadata, arrays=arrays))
+
+
+def _trajectory_dataset() -> SimulationDataset:
+    metadata = _base_metadata()
+    metadata["nonfinite_policy"] = "masked"
+    return SimulationDataset(
+        metadata=metadata,
+        arrays={
+            "timestamps": np.array([0.0, 1.0]),
+            "positions": np.ones((2, 2, 2), dtype=float),
+            "velocities": np.zeros((2, 2, 2), dtype=float),
+            "validity_mask": np.ones((2, 2), dtype=bool),
+            "particle_ids": np.array(["a", "b"]),
+        },
+    )
+
+
+def test_rejects_nonarray_before_inspecting_dimensions() -> None:
+    dataset = _trajectory_dataset()
+    dataset.arrays["positions"] = [[1, 2]]
+    with pytest.raises(ValueError, match="NumPy array"):
+        validate_dataset(dataset)
+
+
+def test_rejects_wrong_spatial_dimension() -> None:
+    dataset = _trajectory_dataset()
+    dataset.arrays["positions"] = np.ones((2, 2, 3))
+    with pytest.raises(ValueError, match="shape"):
+        validate_dataset(dataset)
+
+
+@pytest.mark.parametrize("ids", [["a", "a"], ["a", ""]])
+def test_rejects_invalid_particle_ids(ids) -> None:
+    dataset = _trajectory_dataset()
+    dataset.arrays["particle_ids"] = np.array(ids)
+    with pytest.raises(ValueError, match="unique"):
+        validate_dataset(dataset)
+
+
+def test_rejects_singleton_time_series_length_mismatch() -> None:
+    dataset = _base_dataset(Path("."))
+    dataset.arrays["positions"] = np.array([1.0])
+    with pytest.raises(ValueError, match="share a length"):
+        validate_dataset(dataset)
+
+
+def test_dotted_output_stem_preserved(tmp_path: Path) -> None:
+    from core.simulation.dataset import load_dataset, metadata_only
+
+    dataset = _base_dataset(tmp_path)
+    stem = tmp_path / "example.v1"
+    meta_path, data_path = save_dataset(dataset, stem)
+    assert meta_path.name == "example.v1.meta.json"
+    assert data_path.name == "example.v1.data.npz"
+    assert load_dataset(stem).metadata["simulation_id"] == "fmt_test"
+    assert load_dataset(data_path).metadata["simulation_id"] == "fmt_test"
+    assert metadata_only(stem)["simulation_id"] == "fmt_test"

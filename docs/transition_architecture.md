@@ -35,6 +35,20 @@ Defined in `core/transitions.py`:
 - `TransitionPlan` — a collection; `validate_against(scene_ids)` confirms
   every transition references known start and end scenes.
 
+## Timing contract
+
+Scene durations, simulation windows, and playback speed are currently
+descriptive fields. The models reject non-finite timing values, but they do
+not yet derive a frame mapping or require
+`end_sim_time_s - start_sim_time_s == duration_s * playback_speed`.
+
+Before the Blender adapter uses these fields, choose one source of truth for
+playback timing and define how holds and transitions affect the final frame
+count. A video renderer must not silently guess when these values disagree.
+
+Transition overlap is bounded by its own duration. Transition identifiers
+must be unique within a plan, and transitions must reference known scenes.
+
 ## Physical-to-visual coordinate transformation
 
 Exported simulation data retains original SI values (metres, seconds,
