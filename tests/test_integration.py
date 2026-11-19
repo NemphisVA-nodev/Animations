@@ -200,3 +200,18 @@ def test_records_solver_configuration() -> None:
     assert result.solver_method == "RK45"
     assert result.solver_rtol == pytest.approx(1e-7)
     assert result.solver_atol == pytest.approx(1e-10)
+
+
+def test_failed_solver_result_is_rejected(monkeypatch) -> None:
+    from types import SimpleNamespace
+    import core.physics.integration as integration
+
+    def failed_solver(*args, **kwargs):
+        return SimpleNamespace(
+            success=False, status=-1, sol=None,
+            message="forced test failure",
+        )
+
+    monkeypatch.setattr(integration, "solve_ivp", failed_solver)
+    with pytest.raises(RuntimeError, match="forced test failure"):
+        integrate_particles(_bh(), _single_particle(1.0e8), 1.0, 10)
