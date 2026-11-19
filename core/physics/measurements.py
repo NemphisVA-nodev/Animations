@@ -9,47 +9,42 @@ describe relative test-particle motion, not real material deformation.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
+from scipy.spatial.distance import pdist
 
-from .black_hole import BlackHole
 from .integration import TrajectoryResult
 
 
-def _valid_positions_at(
-    result: TrajectoryResult, time_index: int
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return positions and ids of valid particles at a time index."""
-    mask = result.validity_mask[time_index]
-    positions = result.positions[time_index][mask]
-    ids = np.array(result.particle_ids)[mask]
-    return positions, ids
+def _valid_positions_at(result: TrajectoryResult, time_index: int) -> np.ndarray:
+    """Positions of particles that are still active at this time."""
+    return result.positions[time_index, result.validity_mask[time_index]]
 
 
-def geometric_center(result: TrajectoryResult, time_index: int) -> Optional[np.ndarray]:
+def geometric_center(result: TrajectoryResult, time_index: int) -> np.ndarray | None:
     """Geometric centre of the valid particles at a time index.
 
     Returns None if no particle is valid at that index.
     """
-    positions, _ = _valid_positions_at(result, time_index)
+    positions = _valid_positions_at(result, time_index)
     if positions.size == 0:
         return None
     return np.mean(positions, axis=0)
 
 
 def cloud_centres_over_time(result: TrajectoryResult) -> np.ndarray:
-    """Geometric centre of valid particles at every time, shape ``(T, 2)``.
+    """Mean position of active particles at each timestamp.
 
-    Times with no valid particles are NaN.
+    Rows with no active particles contain NaN.
     """
-    timestamps = result.timestamps
-    count = len(result.particle_ids)
-    centres = np.full((timestamps.size, 2), np.nan, dtype=np.float64)
-    for t in range(timestamps.size):
-        centre = geometric_center(result, t)
-        if centre is not None:
-            centres[t] = centre
+    mask = result.validity_mask
+    counts = mask.sum(axis=1)
+    centres = np.full((len(result.timestamps), 2), np.nan, dtype=np.float64)
+    active_times = counts > 0
+    if np.any(active_times):
+        positions = np.where(mask[..., None], result.positions, 0.0)
+        centres[active_times] = (
+            positions[active_times].sum(axis=1) / counts[active_times, None]
+        )
     return centres
 
 
@@ -80,7 +75,7 @@ def radial_extent(result: TrajectoryResult) -> np.ndarray:
     """
     extents = np.full(result.timestamps.size, np.nan, dtype=np.float64)
     for t in range(result.timestamps.size):
-        positions, _ = _valid_positions_at(result, t)
+        positions = _valid_positions_at(result, t)
         if positions.size == 0:
             continue
         centre = np.mean(positions, axis=0)
@@ -104,7 +99,7 @@ def transverse_extent(result: TrajectoryResult) -> np.ndarray:
     extents = np.full(timestamps.size, np.nan, dtype=np.float64)
     centres = cloud_centres_over_time(result)
     for t in range(timestamps.size):
-        positions, _ = _valid_positions_at(result, t)
+        positions = _valid_positions_at(result, t)
         if positions.size == 0:
             continue
         centre = centres[t]
@@ -132,14 +127,10 @@ def mean_pairwise_separation(result: TrajectoryResult) -> np.ndarray:
     timestamps = result.timestamps
     separations = np.full(timestamps.size, np.nan, dtype=np.float64)
     for t in range(timestamps.size):
-        positions, _ = _valid_positions_at(result, t)
+        positions = _valid_positions_at(result, t)
         if positions.shape[0] < 2:
             continue
-        diff = positions[:, None, :] - positions[None, :, :]
-        distances = np.linalg.norm(diff, axis=2)
-        # Upper triangle without diagonal.
-        iu = np.triu_indices(positions.shape[0], k=1)
-        separations[t] = float(np.mean(distances[iu]))
+        separations[t] = float(pdist(positions).mean())
     return separations
 
 
