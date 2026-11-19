@@ -571,22 +571,34 @@ def test_original_arrays_never_modified(tmp_path: Path) -> None:
 
 
 def test_save_load_round_trip_preserves_trajectory(tmp_path: Path) -> None:
-    """NPZ/JSON save-load round trip preserves trajectory data exactly."""
-    stem = _make_trajectory_dataset(tmp_path, n_times=7, n_particles=2)
+    """Compare a calculated trajectory with what actually comes off disk."""
+    from core.physics.black_hole import BlackHole
+    from core.physics.integration import integrate_particles
+    from core.physics.particles import Particle, ParticleCloud
+    from core.simulation.dataset import trajectory_to_dataset
 
-    original = load_dataset(stem)
+    black_hole = BlackHole(
+        mass_kg=1.9885e30,
+        position=np.array([0.0, 0.0]),
+        cutoff_radius_m=1.0e6,
+    )
+    cloud = ParticleCloud([
+        Particle("infall", np.array([3.0e6, 0.0]), np.zeros(2)),
+        Particle("outer", np.array([4.0e6, 0.0]), np.zeros(2)),
+    ])
+    trajectory = integrate_particles(black_hole, cloud, duration_s=3.0, num_steps=50)
+    original = trajectory_to_dataset(trajectory, simulation_id="roundtrip")
+
+    stem = tmp_path / "roundtrip"
+    save_dataset(original, stem)
     reloaded = load_dataset(stem)
 
-    for name in original.arrays:
-        a1 = original.arrays[name]
-        a2 = reloaded.arrays[name]
-        if a1.dtype.kind == "f":
-            assert np.allclose(a1, a2, equal_nan=True), f"{name} mismatch"
-        else:
-            assert np.array_equal(a1, a2), f"{name} mismatch"
-
-    assert original.metadata["simulation_id"] == reloaded.metadata["simulation_id"]
-    assert original.metadata["nonfinite_policy"] == "masked"
+    for name, expected in original.arrays.items():
+        np.testing.assert_array_equal(reloaded.arrays[name], expected, err_msg=name)
+    assert reloaded.metadata["simulation_id"] == "roundtrip"
+    assert reloaded.metadata["numerical_method"] == trajectory.solver_method
+    assert reloaded.metadata["termination_times_s"] == trajectory.termination_times
+    assert reloaded.metadata["units"] == original.metadata["units"]
 
 
 def test_sample_multiple_particles_independent_validity(tmp_path: Path) -> None:
@@ -762,3 +774,91 @@ def test_reactivation_rejected_in_dataset(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="reactivate"):
         validate_dataset(dataset)
+
+
+@pytest.mark.parametrize("validity", [
+    [[False], [True], [True]],            # Invalid from the first sample
+    [[True], [False], [True]],            # Reactivates after a cutoff
+    [[True, False], [False, True], [False, True]],  # Different particles
+])
+def test_reactivation_patterns_rejected(validity) -> None:
+    """Any False-to-True transition is invalid, even without an earlier True."""
+    mask = np.array(validity, dtype=bool)
+    dataset = SimulationDataset(
+        metadata={"nonfinite_policy": "masked"},
+        arrays={
+            "timestamps": np.arange(mask.shape[0], dtype=float),
+            "positions": np.zeros((*mask.shape, 2), dtype=float),
+            "velocities": np.zeros((*mask.shape, 2), dtype=float),
+            "validity_mask": mask,
+            "particle_ids": np.array([f"p{i}" for i in range(mask.shape[1])]),
+        },
+    )
+    with pytest.raises(ValueError, match="reactivate"):
+        sample_particle_positions(dataset, ["p0"], np.array([1.0]))
+
+
+def test_sampler_rejects_mismatched_velocity_shape(tmp_path: Path) -> None:
+    dataset = load_dataset(_make_trajectory_dataset(tmp_path, n_particles=2))
+    dataset.arrays["velocities"] = dataset.arrays["velocities"][:, :1]
+    with pytest.raises(ValueError, match="velocities"):
+        sample_particle_positions(dataset, ["p000"], np.array([0.5]))
+
+
+def test_byte_string_particle_ids_can_be_sampled(tmp_path: Path) -> None:
+    dataset = load_dataset(_make_trajectory_dataset(tmp_path, n_particles=1))
+    dataset.arrays["particle_ids"] = np.array([b"p000"])
+    positions, valid = sample_particle_positions(dataset, ["p000"], np.array([2.5]))
+    assert valid.tolist() == [[True]]
+    assert positions[0, 0] == pytest.approx([2.5, 1.25])
+
+
+def test_hold_includes_every_frame_time() -> None:
+    mapping = build_frame_mapping(PlaybackSpec(
+        scene_id="test", simulation_id="test", fps=30.0,
+        duration_s=2.0, start_sim_time_s=0.0,
+        end_sim_time_s=4.0, hold_s=1.0,
+    ))
+    assert mapping.all_sim_times_s.shape == (90,)
+    assert mapping.all_frame_times_s.shape == (90,)
+    np.testing.assert_array_equal(
+        mapping.all_sim_times_s[60:],
+        np.full(30, mapping.endpoint_sim_time_s),
+    )
+    np.testing.assert_allclose(mapping.all_frame_times_s, np.arange(90) / 30)
+
+
+def test_single_timestamp_can_be_sampled(tmp_path: Path) -> None:
+    dataset = load_dataset(_make_trajectory_dataset(tmp_path, n_particles=1))
+    for name in ("timestamps", "positions", "velocities", "validity_mask"):
+        dataset.arrays[name] = dataset.arrays[name][:1]
+    positions, valid = sample_particle_positions(
+        dataset, ["p000"], np.array([0.0, 1.0]),
+    )
+    assert valid.tolist() == [[True], [False]]
+    assert positions[0, 0] == pytest.approx([0.0, 0.0])
+    assert np.isnan(positions[1, 0]).all()
+
+
+def test_playback_import_does_not_require_scipy() -> None:
+    """Blender needs only NumPy to import and use the playback module."""
+    import subprocess
+    import sys
+
+    code = """
+import builtins
+real_import = builtins.__import__
+def prevent_scipy(name, *args, **kwargs):
+    if name == 'scipy' or name.startswith('scipy.'):
+        raise RuntimeError('unexpected SciPy import: ' + name)
+    return real_import(name, *args, **kwargs)
+builtins.__import__ = prevent_scipy
+import core.playback
+import core.simulation.dataset
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+    assert completed.returncode == 0, completed.stderr
