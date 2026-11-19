@@ -159,3 +159,40 @@ def test_save_load_roundtrip_preserves_precision(tmp_path: Path) -> None:
         assert np.array_equal(loaded.arrays[name], dataset.arrays[name])
     assert loaded.arrays["timestamps"].dtype == np.float64
     assert loaded.metadata["schema_version"] == SCHEMA_VERSION
+
+
+def test_load_dataset_from_npz_path(tmp_path: Path) -> None:
+    from core.simulation.dataset import load_dataset
+
+    dataset = _base_dataset(tmp_path)
+    _, npz_path = save_dataset(dataset, tmp_path / "example")
+    loaded = load_dataset(npz_path)
+    assert np.array_equal(loaded.arrays["positions"], dataset.arrays["positions"])
+
+
+def test_rejects_object_dtype_particle_ids() -> None:
+    metadata = _base_metadata()
+    metadata["nonfinite_policy"] = "masked"
+    arrays = {
+        "timestamps": np.array([0.0, 1.0]),
+        "positions": np.ones((2, 1, 2)),
+        "velocities": np.ones((2, 1, 2)),
+        "validity_mask": np.ones((2, 1), dtype=bool),
+        "particle_ids": np.array(["p0"], dtype=object),
+    }
+    with pytest.raises(ValueError, match="string array"):
+        validate_dataset(SimulationDataset(metadata=metadata, arrays=arrays))
+
+
+def test_rejects_nonboolean_validity_mask() -> None:
+    metadata = _base_metadata()
+    metadata["nonfinite_policy"] = "masked"
+    arrays = {
+        "timestamps": np.array([0.0, 1.0]),
+        "positions": np.ones((2, 1, 2)),
+        "velocities": np.ones((2, 1, 2)),
+        "validity_mask": np.ones((2, 1), dtype=int),
+        "particle_ids": np.array(["p0"]),
+    }
+    with pytest.raises(ValueError, match="boolean"):
+        validate_dataset(SimulationDataset(metadata=metadata, arrays=arrays))
