@@ -1,8 +1,4 @@
-"""Tests for physical-time-to-frame mapping and trajectory sampling.
-
-Tests verify actual expected values, not merely that functions return something.
-All datasets are built in temporary directories so the repository stays clean.
-"""
+"""Tests for frame mapping, masked interpolation and saved trajectories."""
 
 from __future__ import annotations
 
@@ -25,9 +21,7 @@ from core.simulation.dataset import (
     validate_dataset,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers to build deterministic trajectory datasets in memory / on disk.
-# ---------------------------------------------------------------------------
+
 
 
 def _make_trajectory_dataset(
@@ -131,9 +125,7 @@ def _make_trajectory_dataset(
     return stem
 
 
-# ---------------------------------------------------------------------------
-# Frame mapping tests
-# ---------------------------------------------------------------------------
+
 
 
 def test_frame_count_deterministic_at_24_30_60_fps() -> None:
@@ -396,9 +388,7 @@ def test_conceptual_scene_without_simulation() -> None:
     assert mapping.num_frames == 60
 
 
-# ---------------------------------------------------------------------------
-# Trajectory sampling tests
-# ---------------------------------------------------------------------------
+
 
 
 def test_sample_at_valid_times_returns_expected_positions(tmp_path: Path) -> None:
@@ -511,21 +501,8 @@ def test_unknown_particle_id_raises(tmp_path: Path) -> None:
 
 def test_missing_trajectory_arrays_raises(tmp_path: Path) -> None:
     """A dataset without trajectory arrays raises ValueError."""
-    metadata: SimulationMetadata = {
-        "schema_version": "1.0.0",
-        "simulation_id": "no_traj",
-        "simulation_type": "tidal_acceleration",
-        "model": "newtonian_point_mass_tidal",
-        "model_limitations": "Newtonian only.",
-        "units": {"time": "s", "position": "m"},
-        "reference_frame": {"origin": "mass centre"},
-        "physical_parameters": {},
-        "created_at": "2026-01-01T00:00:00+00:00",
-        "array_sources": {},
-        "notes": "",
-    }
     dataset = SimulationDataset(
-        metadata=metadata,
+        metadata={},
         arrays={
             "timestamps": np.array([0.0, 1.0]),
             "distances": np.array([1.0, 2.0]),
@@ -625,18 +602,11 @@ def test_sample_multiple_particles_independent_validity(tmp_path: Path) -> None:
     assert np.all(np.isfinite(positions[0, 1]))
 
 
-# ---------------------------------------------------------------------------
-# Physics pipeline test (real black-hole generator output)
-# ---------------------------------------------------------------------------
+
 
 
 def test_physics_pipeline_end_to_end(tmp_path: Path) -> None:
-    """End-to-end: generate black-hole dataset, save, reload, compare.
-
-    Verifies the real generator output round-trips including NaN values and
-    metadata, with termination between timestamps, and that frame sampling
-    works on genuine physics output including a non-integer frame count.
-    """
+    """Generate a real black-hole dataset and sample the saved physics output."""
     # Use a short, fast configuration so the test runs quickly.
     import subprocess
     import sys
