@@ -31,17 +31,10 @@ import os
 import sys
 from pathlib import Path
 
-import pytest
-
 try:
     import bpy
 except ImportError:
     bpy = None
-
-pytestmark = pytest.mark.skipif(
-    bpy is None,
-    reason="Blender integration test requires bpy (run inside Blender)",
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
