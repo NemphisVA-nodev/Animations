@@ -141,3 +141,40 @@ def test_tidal_rejects_bad_length() -> None:
         radial_tidal_acceleration(result, object_length_m=0.0)
     with pytest.raises(ValueError):
         transverse_tidal_acceleration(result, object_length_m=-1.0)
+
+
+def test_centres_ignore_inactive_particles() -> None:
+    result = _make_result()
+    centres = cloud_centres_over_time(result)
+    for t in range(len(result.timestamps)):
+        active = result.positions[t, result.validity_mask[t]]
+        assert centres[t] == pytest.approx(np.mean(active, axis=0))
+
+    result.validity_mask[2] = False
+    assert np.isnan(cloud_centres_over_time(result)[2]).all()
+
+
+def test_pairwise_distance_matches_known_triangle() -> None:
+    result = _make_result()
+    result.positions[0] = np.array([[0.0, 0.0], [3.0, 0.0], [0.0, 4.0]])
+    # Pairwise distances are 3, 4, and 5 metres.
+    assert mean_pairwise_separation(result)[0] == pytest.approx(4.0)
+
+
+def test_tidal_acceleration_matches_scalar_formula() -> None:
+    from scipy.constants import G
+
+    result = _make_result()
+    length = 1.0e6
+    centres = cloud_centres_over_time(result)
+    distances = np.linalg.norm(centres - result.black_hole.position, axis=1)
+    expected = 2 * G * result.black_hole.mass_kg * length / distances**3
+    assert radial_tidal_acceleration(result, length) == pytest.approx(expected)
+
+
+def test_tidal_acceleration_handles_missing_cloud_center() -> None:
+    result = _make_result()
+    result.validity_mask[2] = False
+    values = radial_tidal_acceleration(result, 1.0e6)
+    assert np.isfinite(values[:2]).all()
+    assert np.isnan(values[2])
