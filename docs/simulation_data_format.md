@@ -47,7 +47,7 @@ All quantities use SI units unless explicitly documented otherwise.
 
 ## Numerical arrays (`<stem>.data.npz`)
 
-Compressed NumPy archive. Each member is a 1-D `float64` array.
+Compressed NumPy archive. Tidal datasets contain 1-D numerical arrays. Particle trajectories also contain 3-D position/velocity arrays, a boolean validity mask, and string identifiers.
 
 Recommended members for a tidal dataset:
 
@@ -62,7 +62,23 @@ Recommended members for a tidal dataset:
 | `transverse_compression` | m/s² | Transverse tidal compression (negative). |
 
 All multi-element arrays must share the same length so trajectories align.
-Every value must be finite.
+All samples must be finite for the tidal dataset.
+
+## Particle trajectory datasets
+
+The trajectory format uses `nonfinite_policy: "masked"` in JSON metadata:
+
+| Array | Shape | Content |
+|-------|-------|---------|
+| `timestamps` | `(T,)` | Strictly increasing physical seconds |
+| `positions` | `(T, N, 2)` | Cartesian positions in metres |
+| `velocities` | `(T, N, 2)` | Cartesian velocities in m/s |
+| `validity_mask` | `(T, N)` | Boolean validity for each particle at each timestamp |
+| `particle_ids` | `(N,)` | Unicode or byte-string identifiers; object arrays are rejected |
+
+A terminated particle has NaN positions and velocities in samples where its
+mask is false. All valid entries must be finite. The metadata also records
+the actual integration method and tolerances.
 
 ## Classification labels
 
@@ -85,8 +101,8 @@ from pathlib import Path
 def load_simulation(stem: str | Path):
     stem = Path(stem)
     meta = json.loads((stem.with_suffix(".meta.json")).read_text())
-    data = np.load(stem.with_suffix(".data.npz"))
-    arrays = {name: data[name] for name in data.files}
+    with np.load(stem.with_suffix(".data.npz"), allow_pickle=False) as data:
+        arrays = {name: data[name] for name in data.files}
     return meta, arrays
 ```
 
@@ -98,6 +114,6 @@ Only `json` and `numpy` are required. No SciPy, Matplotlib, or Pillow.
 - `schema_version` == `1.0.0`.
 - `units` contains `time` and `position`.
 - `reference_frame` is a non-empty object.
-- Every array is 1-D, non-empty, finite, and (when multi-element) shares a
-  common length with the others.
+- Tidal-series arrays are 1-D and finite. Trajectory arrays follow the
+  shapes and masked-value rules above.
 - `timestamps`, when present, is strictly increasing.
