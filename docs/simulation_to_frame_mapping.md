@@ -130,9 +130,9 @@ positions, validity = sample_particle_positions(
   invalid samples are never crossed.
 * The original NPZ arrays are never modified.
 
-## 4. Data the future Blender importer will consume
+## 4. Data consumed by the Blender importer
 
-The Blender importer (future work) can read the same `.meta.json` + `.data.npz`
+The Step 5B Blender importer reads the same `.meta.json` + `.data.npz`
 files using `json` and `numpy` — no SciPy, Matplotlib, or Pillow needed.
 The playback and dataset modules also avoid runtime imports of SciPy:
 
@@ -147,7 +147,7 @@ with np.load(stem.with_name(stem.name + ".data.npz"), allow_pickle=False) as dat
     arrays = {name: data[name] for name in data.files}
 ```
 
-Arrays it will consume:
+Arrays it consumes:
 | Array | Shape | Units |
 |-------|-------|-------|
 | `timestamps` | `(T,)` | s |

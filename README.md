@@ -105,6 +105,8 @@ following Python-side (no Blender) foundation has been implemented and tested:
 validated trajectory datasets and creates keyframed particle animations with
 linear movement, step-wise visibility and a configurable playback frame rate.
 This is a technical preview, not a physically realistic black-hole rendering.
+The basic fixed camera is best suited to smaller trajectories; larger scales
+may require adjusting the camera framing in Blender.
 
 To build a Blender preview, first generate a trajectory dataset, then run
 from the repository root (replace `blender` with your Blender executable path):

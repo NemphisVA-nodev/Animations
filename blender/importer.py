@@ -67,6 +67,9 @@ class TrajectoryData:
     positions:
         Particle positions in metres, shape ``(T, N, 2)``. Entries where the
         validity mask is False are NaN.
+    velocities:
+        Particle velocities in m/s, shape ``(T, N, 2)``. Invalid samples
+        remain NaN, just like positions.
     validity_mask:
         Boolean validity per particle per timestamp, shape ``(T, N)``.
     metadata:
@@ -166,7 +169,6 @@ def load_trajectory(
         metadata=dict(dataset.metadata),
         scale=float(scale),
     )
-
 
 
 def metres_to_blender(
