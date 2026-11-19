@@ -16,6 +16,13 @@ if TYPE_CHECKING:
     from core.simulation.dataset import SimulationDataset
     from core.timeline import SceneTimeline
 
+__all__ = [
+    "PlaybackSpec",
+    "FrameMapping",
+    "build_frame_mapping",
+    "sample_particle_positions",
+]
+
 
 @dataclass(frozen=True)
 class PlaybackSpec:
