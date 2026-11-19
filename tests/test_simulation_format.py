@@ -253,3 +253,27 @@ def test_dotted_output_stem_preserved(tmp_path: Path) -> None:
     assert load_dataset(stem).metadata["simulation_id"] == "fmt_test"
     assert load_dataset(data_path).metadata["simulation_id"] == "fmt_test"
     assert metadata_only(stem)["simulation_id"] == "fmt_test"
+
+
+@pytest.mark.parametrize("validity", [
+    [False, True, True],
+    [True, False, True],
+])
+def test_dataset_rejects_reactivation_without_prior_cutoff(validity) -> None:
+    metadata = _base_metadata()
+    metadata["nonfinite_policy"] = "masked"
+    mask = np.array(validity, dtype=bool)[:, None]
+    values = np.ones((3, 1, 2), dtype=float)
+    values[~mask] = np.nan
+    dataset = SimulationDataset(
+        metadata=metadata,
+        arrays={
+            "timestamps": np.array([0.0, 1.0, 2.0]),
+            "positions": values,
+            "velocities": values.copy(),
+            "validity_mask": mask,
+            "particle_ids": np.array(["p0"]),
+        },
+    )
+    with pytest.raises(ValueError, match="reactivate"):
+        validate_dataset(dataset)
