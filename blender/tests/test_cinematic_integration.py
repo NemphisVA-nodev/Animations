@@ -51,6 +51,23 @@ def run_cinematic_test(
     assert "BlackHole_Marker" in objects
     assert objects["BlackHole_Marker"]["visual_classification"].startswith("SCHEMATIC")
 
+    # Regression: no default Blender startup cube should remain in the scene.
+    assert "Cube" not in bpy.data.objects, "startup Cube was not removed"
+
+    # Regression: black hole marker must be dark/schematic (low emission).
+    bh = objects["BlackHole_Marker"]
+    bh_mat = bh.data.materials[0]
+    bh_mat.use_nodes = True
+    bsdf = bh_mat.node_tree.nodes.get("Principled BSDF")
+    assert bsdf is not None, "black hole should use Principled BSDF"
+    base_color = bsdf.inputs["Base Color"].default_value[:3]
+    assert all(c < 0.15 for c in base_color), (
+        f"black hole base color too bright: {base_color}"
+    )
+    assert bsdf.inputs["Emission Strength"].default_value < 0.5, (
+        "black hole should not be brightly emissive"
+    )
+
     collection = bpy.data.collections[VISUAL_COLLECTION]
     ring_names = {
         f"Cinematic_AccretionRing_{index}" for index in range(1, 4)
@@ -58,6 +75,22 @@ def run_cinematic_test(
     assert ring_names.issubset({obj.name for obj in collection.objects})
     assert scene["visual_classification"].startswith("SCHEMATIC")
     assert scene["physics_classification"].startswith("CALCULATED")
+
+    # Regression: rings must be tilted (rotation about X > 0).
+    for ring_name in ring_names:
+        ring = bpy.data.objects[ring_name]
+        assert abs(ring.rotation_euler.x) > 0.05, (
+            f"{ring_name} should be tilted, got x={ring.rotation_euler.x}"
+        )
+
+    # Regression: camera framing should not be excessively far left.
+    cam = scene.camera
+    assert cam is not None
+    # Camera X should not be further left than the subject center minus
+    # a reasonable offset; this catches a camera that drifts off-screen.
+    assert cam.location.x > -50.0, (
+        f"camera too far left: x={cam.location.x}"
+    )
 
     ids = [pid for pid in objects if pid != "BlackHole_Marker"]
     spec = PlaybackSpec(

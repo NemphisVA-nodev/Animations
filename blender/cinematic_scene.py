@@ -62,7 +62,31 @@ PARTICLE_COLORS = (
     (0.90, 0.45, 1.00, 1.0),
 )
 
+# Names of objects that Blender's default startup file creates. These are
+# removed from the cinematic scene so they never occlude the black hole or
+# appear as an unexplained gray block in the render.
+DEFAULT_STARTUP_OBJECTS = {"Cube", "Camera", "Light"}
+
 __all__ = ["build_cinematic_scene", "main"]
+
+
+def _remove_default_startup_objects() -> None:
+    """Remove Blender startup-file objects that are not part of the cinematic scene.
+
+    Blender's default startup file contains a Cube, Camera and Light. The
+    Cube sits at the origin and would occlude the black-hole center; the
+    default Camera and Light are superseded by the cinematic camera and fill
+    light. Objects already claimed by the Step 5B preview collection are left
+    untouched.
+    """
+    for name in DEFAULT_STARTUP_OBJECTS:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            continue
+        # Never remove objects that belong to the Step 5B preview collection.
+        if any(c.name == "Animations_Preview" for c in obj.users_collection):
+            continue
+        bpy.data.objects.remove(obj, do_unlink=True)
 
 
 def _visual_collection():
@@ -118,7 +142,13 @@ def _emission_material(name: str, color: tuple[float, ...], strength: float):
 
 
 def _darken_black_hole(obj) -> None:
-    """The black hole is a decorative dark sphere, not a metric event horizon."""
+    """Make the black-hole marker a readable dark schematic core.
+
+    A pure black sphere on a near-black background is invisible. Instead the
+    marker uses a very dark cool color with a faint self-illumination so its
+    circular silhouette reads against the background. It is explicitly a
+    schematic marker, not a relativistic event horizon.
+    """
     if obj.data.materials:
         material = obj.data.materials[0]
     else:
@@ -129,15 +159,23 @@ def _darken_black_hole(obj) -> None:
     nodes.clear()
     output = nodes.new("ShaderNodeOutputMaterial")
     bsdf = nodes.new("ShaderNodeBsdfPrincipled")
-    bsdf.inputs["Base Color"].default_value = (0.001, 0.001, 0.003, 1.0)
-    bsdf.inputs["Roughness"].default_value = 0.96
+    bsdf.inputs["Base Color"].default_value = (0.02, 0.025, 0.045, 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.98
+    bsdf.inputs["Emission Strength"].default_value = 0.15
+    bsdf.inputs["Emission Color"].default_value = (0.05, 0.07, 0.12, 1.0)
     material.node_tree.links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
     obj["visual_classification"] = "SCHEMATIC black-hole marker, not to scale"
 
 
 def _make_glow_ring(name, radius, thickness, height, color, collection):
+    """Add one tilted schematic accretion-style ring.
+
+    The ring is rotated about X by ~18 degrees so it reads as a disk seen at
+    an angle rather than a flat stack of circles. Thickness and glow are kept
+    modest for Eevee draft performance.
+    """
     bpy.ops.mesh.primitive_torus_add(
-        major_segments=128,
+        major_segments=96,
         minor_segments=8,
         major_radius=radius,
         minor_radius=thickness,
@@ -145,8 +183,9 @@ def _make_glow_ring(name, radius, thickness, height, color, collection):
     )
     obj = bpy.context.active_object
     obj.name = name
+    obj.rotation_euler = (0.30, 0.0, 0.0)  # ~18 degree tilt toward camera
     _move_into_collection(obj, collection)
-    obj.data.materials.append(_emission_material(name + "_Mat", color, 3.0))
+    obj.data.materials.append(_emission_material(name + "_Mat", color, 2.2))
     for polygon in obj.data.polygons:
         polygon.use_smooth = True
     obj["visual_classification"] = "SCHEMATIC glowing ring; no lensing simulation"
@@ -165,7 +204,7 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     curve = bpy.data.curves.new(pid + "_TrailGeometry", type="CURVE")
     curve.dimensions = "3D"
     curve.resolution_u = 1
-    curve.bevel_depth = 0.025
+    curve.bevel_depth = 0.018
     curve.bevel_resolution = 2
     # POLY curve: RESOLUTION maps each equally spaced sample to one segment.
     curve.bevel_factor_mapping_start = "RESOLUTION"
@@ -180,7 +219,7 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     obj = bpy.data.objects.new(pid + "_Trail", curve)
     collection.objects.link(obj)
     curve.materials.append(_emission_material(
-        pid + "_TrailMat", color, 2.0
+        pid + "_TrailMat", color, 1.6
     ))
     obj["visual_classification"] = "CALCULATED positions; SCHEMATIC trailing highlight"
 
@@ -189,6 +228,7 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
         curve.bevel_factor_start = float(start[idx])
         curve.bevel_factor_end = float(end[idx])
         curve.keyframe_insert(data_path="bevel_factor_start", frame=frame)
+        curve.bevel_factor_end = float(end[idx])
         curve.keyframe_insert(data_path="bevel_factor_end", frame=frame)
         obj.hide_viewport = not bool(visible[idx])
         obj.hide_render = not bool(visible[idx])
@@ -214,16 +254,28 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
 
 
 def _configure_camera(center_x, center_y, half_extent, collection):
+    """Place the camera for a balanced 16:9 cinematic composition.
+
+    The black hole sits near the left third of the frame so the particle
+    trails have room to extend into the right side without excessive empty
+    space. The camera looks down from upper-right toward the origin.
+    """
     bpy.ops.object.camera_add()
     camera = bpy.context.active_object
     camera.name = "Cinematic_Camera"
     _move_into_collection(camera, collection)
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = max(8.0, half_extent * 3.2)
+    # Ortho scale fits both the black hole and the particle trail region.
+    camera.data.ortho_scale = max(8.0, half_extent * 2.6)
+
+    # Rule of thirds: offset the subject (origin / black hole) toward the
+    # left side so the right side carries the trailing particle motion.
+    offset_x = center_x - half_extent * 0.28
+    offset_y = center_y - half_extent * 0.42
     camera.location = (
-        center_x,
-        center_y - half_extent * 0.55,
-        half_extent * 2.6,
+        offset_x + half_extent * 0.62,
+        offset_y - half_extent * 0.62,
+        half_extent * 2.1,
     )
     target = Vector((center_x, center_y, 0.0))
     camera.rotation_euler = (target - camera.location).to_track_quat(
@@ -249,8 +301,8 @@ def _configure_scene(quality: str) -> None:
     world.use_nodes = True
     background = world.node_tree.nodes.get("Background")
     if background is not None:
-        background.inputs["Color"].default_value = (0.005, 0.008, 0.02, 1.0)
-        background.inputs["Strength"].default_value = 0.25
+        background.inputs["Color"].default_value = (0.006, 0.009, 0.018, 1.0)
+        background.inputs["Strength"].default_value = 0.30
     scene["physics_classification"] = "CALCULATED Newtonian particle trajectories"
     scene["visual_classification"] = "SCHEMATIC rings, glow, camera, marker"
 
@@ -276,6 +328,11 @@ def build_cinematic_scene(
         raise ValueError("quality must be draft or final")
     if isinstance(trail_frames, bool) or not isinstance(trail_frames, int) or trail_frames < 1:
         raise ValueError("trail_frames must be a positive integer")
+
+    # Remove default Blender startup objects before adding anything else, so
+    # the startup Cube never occludes the black-hole center.
+    _remove_default_startup_objects()
+
     data = load_trajectory(dataset_path, scale=scale)
     spec = PlaybackSpec(
         scene_id="cinematic_black_hole",
@@ -299,10 +356,11 @@ def build_cinematic_scene(
 
     collection = _visual_collection()
     _darken_black_hole(particles[animator.bh_marker_name])
+    particles[animator.bh_marker_name].scale = (0.62, 0.62, 0.62)
     for number, (radius, thickness, height) in enumerate((
-        (1.13, 0.055, -0.025),
-        (1.43, 0.095, -0.09),
-        (1.95, 0.025, -0.12),
+        (1.15, 0.050, -0.020),
+        (1.50, 0.085, -0.075),
+        (2.05, 0.022, -0.110),
     )):
         _make_glow_ring(
             f"Cinematic_AccretionRing_{number + 1}",
@@ -311,7 +369,7 @@ def build_cinematic_scene(
 
     for index, pid in enumerate(data.particle_ids):
         color = PARTICLE_COLORS[index % len(PARTICLE_COLORS)]
-        # Reuse the per-particle material instead of creating another.
+        # Reuse the per-particle material but switch to emission for visibility.
         material = particles[pid].data.materials[0]
         material.use_nodes = True
         nodes = material.node_tree.nodes
@@ -319,11 +377,12 @@ def build_cinematic_scene(
         output = nodes.new("ShaderNodeOutputMaterial")
         emission = nodes.new("ShaderNodeEmission")
         emission.inputs["Color"].default_value = color
-        emission.inputs["Strength"].default_value = 2.5
+        emission.inputs["Strength"].default_value = 4.0
         material.node_tree.links.new(
             emission.outputs["Emission"], output.inputs["Surface"]
         )
-        particles[pid].scale = (0.58, 0.58, 0.58)
+        # Slightly larger particles for readability at draft resolution.
+        particles[pid].scale = (0.85, 0.85, 0.85)
         _make_trail(
             pid,
             scaled_xyz[:, index],
@@ -340,9 +399,9 @@ def build_cinematic_scene(
     light = bpy.context.active_object
     light.name = "Cinematic_FillLight"
     _move_into_collection(light, collection)
-    light.data.energy = 550.0
+    light.data.energy = 700.0
     light.data.shape = "DISK"
-    light.data.size = 6.0
+    light.data.size = 7.0
     _configure_scene(quality)
 
     bpy.context.scene.frame_set(1)

@@ -88,3 +88,33 @@ def test_camera_rejects_no_valid_positions() -> None:
     points = np.full((2, 1, 3), np.nan)
     with pytest.raises(ValueError, match="no valid"):
         camera_plan(points, np.zeros((2, 1), dtype=bool))
+
+
+def test_camera_plan_includes_origin_in_extent() -> None:
+    """The origin (black hole) must always be inside the camera extent."""
+    points = np.array([[[20.0, 5.0, 0.0], [22.0, 7.0, 0.0]]])
+    mask = np.array([[True, True]])
+    center_x, center_y, half_extent = camera_plan(points, mask)
+    # Origin (0,0) must be within half_extent of the center.
+    assert abs(center_x) <= half_extent + 1e-6
+    assert abs(center_y) <= half_extent + 1e-6
+
+
+def test_camera_plan_not_far_left() -> None:
+    """Camera center should not be biased excessively to the left."""
+    # Particles spread to the right of the origin; origin still included.
+    points = np.array([[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]]])
+    mask = np.array([[True, True, True]])
+    center_x, center_y, half_extent = camera_plan(points, mask)
+    assert center_x == pytest.approx(10.0)
+    assert center_y == pytest.approx(0.0)
+    assert half_extent == pytest.approx(10.0)
+
+
+def test_default_startup_object_names() -> None:
+    """The default startup objects to be removed are documented and non-empty."""
+    from blender.cinematic_scene import DEFAULT_STARTUP_OBJECTS
+    assert "Cube" in DEFAULT_STARTUP_OBJECTS
+    assert "Camera" in DEFAULT_STARTUP_OBJECTS
+    assert "Light" in DEFAULT_STARTUP_OBJECTS
+    assert len(DEFAULT_STARTUP_OBJECTS) == 3
