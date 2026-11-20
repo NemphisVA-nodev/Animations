@@ -324,3 +324,44 @@ def visible_infall_window_end(
     # within the source dataset's actual physical-time bounds.
     padded = start + (vanished_at - start) / (1.0 - end_padding_fraction)
     return min(float(times[-1]), float(padded))
+
+
+def trail_width_profile(
+    point_count: int, *, minimum: float = 0.42, maximum: float = 1.0
+) -> np.ndarray:
+    """Decorative taper along pre-existing physically sampled trajectory points."""
+    if isinstance(point_count, (bool, np.bool_)) or not isinstance(
+        point_count, (int, np.integer)
+    ) or point_count < 2:
+        raise ValueError("point_count must be an integer >= 2")
+    if not np.isfinite(minimum) or not np.isfinite(maximum) or not 0 < minimum <= maximum:
+        raise ValueError("width range must be finite, positive and increasing")
+    progress = np.linspace(0.0, 1.0, point_count)
+    return minimum + (maximum - minimum) * np.sqrt(progress)
+
+
+def decorative_disk_arc(
+    radius: float, *, start_angle: float, span_angle: float,
+    points: int = 25, elevation: float = 0.065,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Schematic ring-glint coordinates and tapered width, not gas dynamics."""
+    if not np.isfinite(radius) or radius <= 0:
+        raise ValueError("radius must be finite and positive")
+    if not np.isfinite(start_angle):
+        raise ValueError("start_angle must be finite")
+    if not np.isfinite(span_angle) or not 0 < span_angle < 2 * np.pi:
+        raise ValueError("span_angle must be between zero and 2pi")
+    if isinstance(points, (bool, np.bool_)) or not isinstance(
+        points, (int, np.integer)
+    ) or points < 3:
+        raise ValueError("points must be an integer >= 3")
+    if not np.isfinite(elevation):
+        raise ValueError("elevation must be finite")
+    angles = np.linspace(start_angle, start_angle + span_angle, points)
+    xyz = np.column_stack((
+        radius * np.cos(angles),
+        radius * np.sin(angles),
+        np.full(points, elevation),
+    ))
+    widths = 0.13 + 0.87 * np.sin(np.linspace(0, np.pi, points)) ** 1.2
+    return xyz, widths
