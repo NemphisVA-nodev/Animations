@@ -141,3 +141,22 @@ with a clear error and you can still choose an explicit `--scale`.
 **Limitation:** this is a framing aid, not a guarantee that particles are
 visible at every later frame. Infall can still take them inside the core or
 behind schematic rings. Use `--still-frame` for explicit inspection.
+
+
+## Screen framing and smaller particle markers
+
+The camera now fits the **entire** outer schematic ring and all valid sampled
+particle paths, with aspect-aware margins for the 16:9 output. Previously it
+framed only particle positions, clipping the rings when all test particles
+started on one side of the origin.
+
+Particle UV spheres are reduced to scale `0.23` (mesh radius 0.5; displayed
+radius 0.115 Blender units) instead of `0.85`. This is *purely visual* and
+does not change particle masses, distances, velocities, validity or timing.
+The trail material is slightly brighter and thicker for draft readability.
+The Blender integration test projects decorative-ring mesh vertices through
+the actual camera to guard against cropping.
+
+The animation remains a **schematic Newtonian test-particle visualization**.
+This code does not model actual accretion-disk motion, gravitational lensing,
+relativistic black-hole imaging, or gravitational radiation.

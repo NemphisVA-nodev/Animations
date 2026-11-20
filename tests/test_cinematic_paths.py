@@ -5,6 +5,7 @@ import pytest
 
 from blender.cinematic_paths import (
     camera_plan,
+    cinematic_camera_fit,
     estimate_visual_scale,
     select_still_frame,
     trail_reveal_windows,
@@ -238,3 +239,45 @@ def test_auto_scale_rejects_invalid_target_radius(target_radius) -> None:
             np.ones((1, 1), dtype=bool),
             target_start_radius=target_radius,
         )
+
+
+def test_cinematic_camera_fit_includes_ring_and_distant_particles() -> None:
+    positions = np.array([[[4.0, 0.0, 0.0], [7.0, 0.0, 0.0]]])
+    valid = np.ones((1, 2), dtype=bool)
+    cx, cy, width = cinematic_camera_fit(positions, valid)
+    half_width = width / 2
+    half_height = width / (2 * (16 / 9))
+    assert cx - half_width < -2.12
+    assert cx + half_width > 7.0 + 0.115
+    assert cy - half_height < -2.12
+    assert cy + half_height > 2.12
+
+
+def test_cinematic_camera_fit_is_symmetric_for_central_dataset() -> None:
+    pos = np.array([[[0.0, 0.0, 0.0]]])
+    centre_x, centre_y, width = cinematic_camera_fit(
+        pos, np.array([[True]])
+    )
+    assert centre_x == pytest.approx(0.0)
+    assert centre_y == pytest.approx(0.0)
+    assert width > 2 * 2.12 * 16 / 9
+
+
+def test_cinematic_camera_fit_ignores_terminated_nan() -> None:
+    pos = np.array([[[4., 0., 0.]], [[np.nan, np.nan, np.nan]]])
+    valid = np.array([[True], [False]])
+    cx, cy, width = cinematic_camera_fit(pos, valid)
+    assert np.isfinite([cx, cy, width]).all()
+
+
+@pytest.mark.parametrize("padding", [0, 1, np.nan, np.inf])
+def test_cinematic_camera_fit_rejects_bad_padding(padding) -> None:
+    pos = np.zeros((1, 1, 3), dtype=float)
+    with pytest.raises(ValueError, match="padding"):
+        cinematic_camera_fit(pos, np.ones((1, 1), bool), padding=padding)
+
+
+def test_cinematic_camera_fit_rejects_no_valid_points() -> None:
+    pos = np.zeros((1, 1, 3), dtype=float)
+    with pytest.raises(ValueError, match="no valid"):
+        cinematic_camera_fit(pos, np.zeros((1, 1), bool))

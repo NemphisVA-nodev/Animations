@@ -33,7 +33,7 @@ except ImportError:  # Outside Blender: only pure helpers are unit tested.
 
 from blender.animator import Animator, require_bpy  # noqa: E402
 from blender.cinematic_paths import (  # noqa: E402
-    camera_plan,
+    cinematic_camera_fit,
     estimate_visual_scale,
     select_still_frame,
     trail_reveal_windows,
@@ -209,7 +209,7 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     curve = bpy.data.curves.new(pid + "_TrailGeometry", type="CURVE")
     curve.dimensions = "3D"
     curve.resolution_u = 1
-    curve.bevel_depth = 0.018
+    curve.bevel_depth = 0.024
     curve.bevel_resolution = 2
     # POLY curve: RESOLUTION maps each equally spaced sample to one segment.
     curve.bevel_factor_mapping_start = "RESOLUTION"
@@ -224,7 +224,7 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     obj = bpy.data.objects.new(pid + "_Trail", curve)
     collection.objects.link(obj)
     curve.materials.append(_emission_material(
-        pid + "_TrailMat", color, 1.6
+        pid + "_TrailMat", color, 2.8
     ))
     obj["visual_classification"] = "CALCULATED positions; SCHEMATIC trailing highlight"
 
@@ -233,7 +233,6 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
         curve.bevel_factor_start = float(start[idx])
         curve.bevel_factor_end = float(end[idx])
         curve.keyframe_insert(data_path="bevel_factor_start", frame=frame)
-        curve.bevel_factor_end = float(end[idx])
         curve.keyframe_insert(data_path="bevel_factor_end", frame=frame)
         obj.hide_viewport = not bool(visible[idx])
         obj.hide_render = not bool(visible[idx])
@@ -258,31 +257,26 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     return obj
 
 
-def _configure_camera(center_x, center_y, half_extent, collection):
-    """Place the camera for a balanced 16:9 cinematic composition.
+def _configure_camera(target_x, target_y, ortho_width, collection):
+    """Frame the full schematic ring and simulated trajectories.
 
-    The black hole sits near the left third of the frame so the particle
-    trails have room to extend into the right side without excessive empty
-    space. The camera looks down from upper-right toward the origin.
+    A near-top-down orientation preserves the simulation's XY-plane layout
+    while providing a slight perspective on the decorative tilted rings.
+    `ortho_width` is already calculated for the actual 16:9 image aspect.
     """
     bpy.ops.object.camera_add()
     camera = bpy.context.active_object
     camera.name = "Cinematic_Camera"
     _move_into_collection(camera, collection)
     camera.data.type = "ORTHO"
-    # Ortho scale fits both the black hole and the particle trail region.
-    camera.data.ortho_scale = max(8.0, half_extent * 2.6)
-
-    # Rule of thirds: offset the subject (origin / black hole) toward the
-    # left side so the right side carries the trailing particle motion.
-    offset_x = center_x - half_extent * 0.28
-    offset_y = center_y - half_extent * 0.42
+    camera.data.sensor_fit = "HORIZONTAL"
+    camera.data.ortho_scale = ortho_width
     camera.location = (
-        offset_x + half_extent * 0.62,
-        offset_y - half_extent * 0.62,
-        half_extent * 2.1,
+        target_x,
+        target_y - ortho_width * 0.24,
+        ortho_width * 1.6,
     )
-    target = Vector((center_x, center_y, 0.0))
+    target = Vector((target_x, target_y, 0.0))
     camera.rotation_euler = (target - camera.location).to_track_quat(
         "-Z", "Y"
     ).to_euler()
@@ -397,8 +391,8 @@ def build_cinematic_scene(
         material.node_tree.links.new(
             emission.outputs["Emission"], output.inputs["Surface"]
         )
-        # Slightly larger particles for readability at draft resolution.
-        particles[pid].scale = (0.85, 0.85, 0.85)
+        # Small schematic markers: radius 0.115 Blender units versus core 0.62.
+        particles[pid].scale = (0.23, 0.23, 0.23)
         _make_trail(
             pid,
             scaled_xyz[:, index],
@@ -409,8 +403,8 @@ def build_cinematic_scene(
             collection,
         )
 
-    center_x, center_y, extent = camera_plan(scaled_xyz, mask)
-    _configure_camera(center_x, center_y, extent, collection)
+    target_x, target_y, ortho_width = cinematic_camera_fit(scaled_xyz, mask)
+    _configure_camera(target_x, target_y, ortho_width, collection)
     bpy.ops.object.light_add(type="AREA", location=(0.0, -3.0, 7.0))
     light = bpy.context.active_object
     light.name = "Cinematic_FillLight"

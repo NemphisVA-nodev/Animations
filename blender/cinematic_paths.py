@@ -104,7 +104,7 @@ def select_still_frame(
     *,
     active_frames: int,
     core_radius: float = 0.62,
-    particle_radius: float = 0.425,
+    particle_radius: float = 0.115,
 ) -> tuple[int, int]:
     """Choose a 1-based still frame and count particles outside the core.
 
@@ -201,3 +201,58 @@ def estimate_visual_scale(
     if not np.isfinite(estimated) or estimated <= 0:
         raise ValueError("auto-scale is not a positive finite value")
     return estimated
+
+
+def cinematic_camera_fit(
+    scaled_positions_xyz: np.ndarray,
+    validity_mask: np.ndarray,
+    *,
+    outer_ring_radius: float = 2.12,
+    particle_radius: float = 0.115,
+    aspect_ratio: float = 16 / 9,
+    padding: float = 1.18,
+) -> tuple[float, float, float]:
+    """Return (target_x, target_y, orthographic *width*) for a 16:9 scene.
+
+    The framing includes all valid calculated particle centres with a small
+    marker allowance AND the full schematic accretion rings around (0, 0).
+    Using only particle bounds previously cropped the rings at the left.
+
+    The camera uses HORIZONTAL sensor fit and a near-top-down orientation:
+    X projects horizontally, and XY bounds conservatively cover the
+    foreshortened Y projection. The padding accommodates ring tilt and Z.
+    No input trajectories are changed.
+    """
+    positions = np.asarray(scaled_positions_xyz, dtype=np.float64)
+    valid = np.asarray(validity_mask)
+    if positions.ndim != 3 or positions.shape[-1] != 3:
+        raise ValueError("scaled_positions_xyz must have shape (T, N, 3)")
+    if valid.shape != positions.shape[:2] or valid.dtype.kind != "b":
+        raise ValueError("validity_mask must be boolean with shape (T, N)")
+    if not all(
+        np.isfinite(value) and value > 0
+        for value in (outer_ring_radius, particle_radius, aspect_ratio)
+    ):
+        raise ValueError("ring radius, particle radius and aspect must be positive")
+    if not np.isfinite(padding) or padding <= 1:
+        raise ValueError("padding must be finite and greater than one")
+
+    active = positions[valid]
+    if not active.size:
+        raise ValueError("no valid sampled positions for cinematic camera")
+    if not np.all(np.isfinite(active)):
+        raise ValueError("valid sampled positions must be finite")
+
+    min_x = min(float(np.min(active[:, 0])) - particle_radius, -outer_ring_radius)
+    max_x = max(float(np.max(active[:, 0])) + particle_radius, outer_ring_radius)
+    min_y = min(float(np.min(active[:, 1])) - particle_radius, -outer_ring_radius)
+    max_y = max(float(np.max(active[:, 1])) + particle_radius, outer_ring_radius)
+    width = max_x - min_x
+    height = max_y - min_y
+    target_x = (min_x + max_x) / 2
+    target_y = (min_y + max_y) / 2
+
+    # With horizontal sensor fit, ortho_scale represents the image width;
+    # the vertical size is ortho_scale / aspect_ratio.
+    horizontal_scale = max(width, height * aspect_ratio) * padding
+    return target_x, target_y, horizontal_scale
