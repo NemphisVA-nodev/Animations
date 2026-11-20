@@ -20,6 +20,9 @@ directory, and the manifest ensures idempotent re-runs.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import math
+import re
 import sys
 from pathlib import Path
 
@@ -141,10 +144,26 @@ def render_frames(
     """
     require_bpy()
 
+    if (
+        isinstance(frame_start, bool) or isinstance(frame_end, bool)
+        or frame_start < 1 or frame_end < frame_start
+    ):
+        raise ValueError("frame range must be positive and increasing")
+    if not (math.isfinite(fps) and fps > 0 and
+            math.isfinite(fps_base) and fps_base > 0):
+        raise ValueError("fps and fps_base must be positive and finite")
+    if resolution_x <= 0 or resolution_y <= 0:
+        raise ValueError("render resolution must be positive")
+    if not 1 <= resolution_percentage <= 100:
+        raise ValueError("resolution_percentage must be from 1 to 100")
+    if re.fullmatch(r"[A-Za-z0-9_-]+", stem) is None:
+        raise ValueError("stem must contain only letters, digits, _ or -")
+
     blend_path = Path(blend_path).resolve()
     if not blend_path.is_file():
         raise FileNotFoundError(f"blend file not found: {blend_path}")
 
+    blend_sha256 = hashlib.sha256(blend_path.read_bytes()).hexdigest()
     frame_dir = Path(frame_dir).resolve()
     frame_dir.mkdir(parents=True, exist_ok=True)
 
@@ -152,13 +171,23 @@ def render_frames(
         manifest_path = frame_dir / "render_manifest.json"
     manifest_path = Path(manifest_path)
 
-    # Load or create manifest.
-    manifest = None
-    if resume and manifest_path.exists():
-        try:
-            manifest = RenderManifest.load(manifest_path)
-        except ManifestError:
-            manifest = None
+    # Never re-render on top of existing PNGs, even with --no-resume.
+    # For a fresh run, users must choose a fresh output directory.
+    existing_frames = list(frame_dir.glob(f"{stem}_*.png"))
+    if not resume and existing_frames:
+        raise ManifestError(
+            "output directory already contains frames; --no-resume requires "
+            "a new output directory to avoid overwriting."
+        )
+
+    # A damaged manifest must not be silently ignored: that would risk
+    # mixing or overwriting frames from different render configurations.
+    manifest = RenderManifest.load(manifest_path) if resume and manifest_path.exists() else None
+    if manifest is None and existing_frames:
+        raise ManifestError(
+            "PNG frames exist without a compatible render manifest; "
+            "choose a new output directory instead of overwriting."
+        )
 
     if manifest is not None:
         if not manifest.config_matches(
@@ -168,6 +197,9 @@ def render_frames(
             resolution_x=resolution_x,
             resolution_y=resolution_y,
             resolution_percentage=resolution_percentage,
+            blend_sha256=blend_sha256,
+            stem=stem,
+            output_dir=frame_dir,
         ):
             raise ManifestError(
                 f"existing manifest at {manifest_path} is incompatible with "
@@ -186,6 +218,8 @@ def render_frames(
             resolution_percentage=resolution_percentage,
             frame_start=frame_start,
             frame_end=frame_end,
+            blend_sha256=blend_sha256,
+            stem=stem,
         )
 
     # Load the .blend scene.
@@ -199,25 +233,41 @@ def render_frames(
     scene.render.resolution_x = resolution_x
     scene.render.resolution_y = resolution_y
     scene.render.resolution_percentage = resolution_percentage
-    # Blender's render.fps expects an int; store the original float in the
-    # manifest for accurate config matching.
-    scene.render.fps = int(fps)
-    scene.render.fps_base = fps_base
+    # Blender requires an integer numerator, but can preserve the exact
+    # requested effective frame rate through fps_base.
+    nominal_fps = max(1, round(fps))
+    scene.render.fps = nominal_fps
+    scene.render.fps_base = nominal_fps / (fps / fps_base)
     scene.frame_start = frame_start
     scene.frame_end = frame_end
 
     # Determine which frames still need rendering.
-    completed = set(manifest.completed_frames)
-    in_range = set(range(frame_start, frame_end + 1))
-    pending = [f for f in range(frame_start, frame_end + 1) if f not in completed]
-    skipped = len(in_range & completed)
+    verified = manifest.verified_frames(frame_dir) if resume else set()
+    # Missing files are considered incomplete, and rendered again.
+    manifest.completed_frames = sorted(verified)
+    manifest.frame_checksums = {
+        str(f): checksum
+        for f, checksum in (
+            (int(key), value) for key, value in manifest.frame_checksums.items()
+        )
+        if f in verified
+    }
+    pending = [f for f in range(frame_start, frame_end + 1) if f not in verified]
+    skipped = sum(f in verified for f in range(frame_start, frame_end + 1))
+
+    for frame in pending:
+        if (frame_dir / f"{stem}_{frame:04d}.png").exists():
+            raise ManifestError(
+                f"untracked PNG exists for pending frame {frame}; "
+                "use a new output directory to avoid overwriting."
+            )
 
     rendered = 0
 
     for frame_number in pending:
         _render_frame(scene, frame_number, frame_dir, stem=stem)
-        manifest.mark_complete(
-            frame_number, output_file=frame_dir / f"{stem}_{frame_number:04d}.png"
+        manifest.record_frame_checksum(
+            frame_number, frame_dir / f"{stem}_{frame_number:04d}.png"
         )
         manifest.save(manifest_path)
         rendered += 1

@@ -195,9 +195,63 @@ def test_manifest_json_contains_all_fields(tmp_path: Path) -> None:
         "output_dir", "blend_path", "fps", "fps_base",
         "resolution_x", "resolution_y", "resolution_percentage",
         "frame_start", "frame_end", "completed_frames",
+        "blend_sha256", "stem", "frame_checksums",
         "created_at", "updated_at",
     }
     assert set(data.keys()) == expected_keys
     assert data["completed_frames"] == [1, 2]
     assert isinstance(data["created_at"], str)
     assert isinstance(data["updated_at"], str)
+
+
+def test_manifest_detects_modified_blend_fingerprint(tmp_path: Path) -> None:
+    path = _make_manifest(tmp_path)
+    manifest = RenderManifest.load(path)
+    manifest.blend_sha256 = "abc"
+    assert manifest.config_matches(
+        blend_path=tmp_path / "scene.blend", blend_sha256="abc",
+        stem="frame", output_dir=tmp_path / "frames",
+        fps=24, fps_base=1, resolution_x=960, resolution_y=540,
+        resolution_percentage=100,
+    )
+    assert not manifest.config_matches(
+        blend_path=tmp_path / "scene.blend", blend_sha256="def",
+        stem="frame", output_dir=tmp_path / "frames",
+        fps=24, fps_base=1, resolution_x=960, resolution_y=540,
+        resolution_percentage=100,
+    )
+
+
+def test_manifest_verifies_png_checksum_and_missing_frame(tmp_path: Path) -> None:
+    path = _make_manifest(tmp_path, completed=[])
+    manifest = RenderManifest.load(path)
+    directory = tmp_path / "frames"
+    directory.mkdir()
+    image = directory / "frame_0001.png"
+    image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"image-data")
+    manifest.record_frame_checksum(1, image)
+    assert manifest.verified_frames(directory) == {1}
+    image.unlink()
+    assert manifest.verified_frames(directory) == set()
+
+
+def test_manifest_refuses_modified_png(tmp_path: Path) -> None:
+    path = _make_manifest(tmp_path, completed=[])
+    manifest = RenderManifest.load(path)
+    directory = tmp_path / "frames"
+    directory.mkdir()
+    image = directory / "frame_0001.png"
+    image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"image-data")
+    manifest.record_frame_checksum(1, image)
+    image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"other-data")
+    with pytest.raises(ManifestError, match="differs"):
+        manifest.verified_frames(directory)
+
+
+def test_manifest_save_is_atomic(tmp_path: Path) -> None:
+    path = _make_manifest(tmp_path)
+    reloaded = RenderManifest.load(path)
+    reloaded.completed_frames = [1, 2]
+    reloaded.save(path)
+    assert RenderManifest.load(path).completed_frames == [1, 2]
+    assert not list(tmp_path.glob(".render_manifest.json.*.tmp"))

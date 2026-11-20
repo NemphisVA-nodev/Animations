@@ -14,6 +14,8 @@ and were produced by a compatible configuration.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,6 +68,11 @@ class RenderManifest:
     frame_start: int
     frame_end: int
     completed_frames: list[int] = field(default_factory=list)
+    # These identify the exact scene and file naming contract for safe resume.
+    blend_sha256: str = ""
+    stem: str = "frame"
+    # Completed frame numbers are verified against their actual PNG bytes.
+    frame_checksums: dict[str, str] = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
 
@@ -85,6 +92,9 @@ class RenderManifest:
             "frame_start": self.frame_start,
             "frame_end": self.frame_end,
             "completed_frames": sorted(self.completed_frames),
+            "blend_sha256": self.blend_sha256,
+            "stem": self.stem,
+            "frame_checksums": dict(sorted(self.frame_checksums.items())),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -103,6 +113,11 @@ class RenderManifest:
             frame_start=int(data["frame_start"]),
             frame_end=int(data["frame_end"]),
             completed_frames=[int(f) for f in data.get("completed_frames", [])],
+            blend_sha256=str(data.get("blend_sha256", "")),
+            stem=str(data.get("stem", "frame")),
+            frame_checksums={
+                str(k): str(v) for k, v in data.get("frame_checksums", {}).items()
+            },
             created_at=str(data.get("created_at", "")),
             updated_at=str(data.get("updated_at", "")),
         )
@@ -119,7 +134,21 @@ class RenderManifest:
         self.updated_at = now
         payload = self.to_dict()
         text = json.dumps(payload, indent=2)
-        path.write_text(text, encoding="utf-8")
+        # Atomic replacement avoids truncating the only resume record on crash.
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp", delete=False
+            ) as handle:
+                temp_path = Path(handle.name)
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if temp_path is not None and temp_path.exists():
+                temp_path.unlink()
 
     @classmethod
     def load(cls, path: str | Path) -> "RenderManifest":
@@ -137,7 +166,12 @@ class RenderManifest:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ManifestError(f"invalid manifest JSON in {path}: {exc}") from exc
-        return cls.from_dict(data)
+        try:
+            if not isinstance(data, dict):
+                raise ValueError("manifest root must be a JSON object")
+            return cls.from_dict(data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ManifestError(f"invalid manifest structure in {path}: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Compatibility and resume logic
@@ -151,6 +185,9 @@ class RenderManifest:
         resolution_x: int,
         resolution_y: int,
         resolution_percentage: int,
+        blend_sha256: str | None = None,
+        stem: str | None = None,
+        output_dir: str | Path | None = None,
     ) -> bool:
         """Return True if this manifest's config matches the given request.
 
@@ -167,6 +204,12 @@ class RenderManifest:
             and int(resolution_x) == self.resolution_x
             and int(resolution_y) == self.resolution_y
             and int(resolution_percentage) == self.resolution_percentage
+            and (blend_sha256 is None or self.blend_sha256 == blend_sha256)
+            and (stem is None or self.stem == stem)
+            and (
+                output_dir is None
+                or Path(self.output_dir).resolve() == Path(output_dir).resolve()
+            )
         )
 
     def is_complete(self, frame_number: int) -> bool:
@@ -199,3 +242,50 @@ class RenderManifest:
         if frame_number not in self.completed_frames:
             self.completed_frames.append(frame_number)
             self.completed_frames.sort()
+
+
+    def verified_frames(self, frame_dir: str | Path) -> set[int]:
+        """Verify claimed completed frames and return those still present.
+
+        A deleted frame is safe to re-render. An existing frame with missing
+        checksum, an empty file, or mismatching bytes is *not* safe to silently
+        reuse or overwrite; report the problem instead.
+        """
+        import hashlib
+
+        folder = Path(frame_dir)
+        verified: set[int] = set()
+        for frame in self.completed_frames:
+            candidate = folder / f"{self.stem}_{frame:04d}.png"
+            if not candidate.exists():
+                continue
+            expected = self.frame_checksums.get(str(frame))
+            if not expected:
+                raise ManifestError(
+                    f"frame {frame} has no checksum; cannot safely resume. "
+                    "Use a new output directory."
+                )
+            if candidate.stat().st_size <= 8:
+                raise ManifestError(
+                    f"frame {frame} is empty or truncated: {candidate}"
+                )
+            actual = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            if actual != expected:
+                raise ManifestError(
+                    f"frame {frame} differs from the recorded PNG: {candidate}. "
+                    "Use a new output directory."
+                )
+            verified.add(frame)
+        return verified
+
+    def record_frame_checksum(self, frame_number: int, output_file: str | Path) -> None:
+        """Record a completed frame's exact SHA-256, alongside its frame number."""
+        import hashlib
+
+        path = Path(output_file)
+        if not path.is_file() or path.stat().st_size <= 8:
+            raise ManifestError(f"rendered frame is missing or empty: {path}")
+        self.frame_checksums[str(int(frame_number))] = hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        self.mark_complete(frame_number, path)
