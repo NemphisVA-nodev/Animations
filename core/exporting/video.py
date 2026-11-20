@@ -11,6 +11,8 @@ widely supported by Microsoft PowerPoint.
 
 from __future__ import annotations
 
+import math
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -93,7 +95,7 @@ def _is_executable(path: Path) -> bool:
         return False
     if os.name == "nt":
         ext = path.suffix.lower()
-        return ext in (".exe", ".bat", ".cmd", ".ps1", ".com") or ext == ""
+        return ext in (".exe", ".bat", ".cmd", ".com") or ext == ""
     return os.access(path, os.X_OK)
 
 
@@ -109,6 +111,7 @@ def build_ffmpeg_command(
     crf: int = 18,
     preset: str = "medium",
     extra_args: Sequence[str] | None = None,
+    start_number: int | None = None,
 ) -> list[str]:
     """Build an FFmpeg command line to encode PNG frames into MP4.
 
@@ -145,19 +148,21 @@ def build_ffmpeg_command(
     """
     fps_val = float(fps)
     fps_base_val = float(fps_base)
-    if fps_base_val == 0.0:
-        raise ValueError(
-            "effective FPS must be positive and finite (fps_base is zero)"
-        )
+    if not math.isfinite(fps_val) or not math.isfinite(fps_base_val) or fps_base_val <= 0:
+        raise ValueError("effective FPS must be positive and finite")
     effective_fps = fps_val / fps_base_val
-    if effective_fps <= 0 or effective_fps != effective_fps:  # NaN check
+    if not math.isfinite(effective_fps) or effective_fps <= 0:
         raise ValueError(
             f"effective FPS must be positive and finite, got {effective_fps}"
         )
 
     cmd: list[str] = [str(ffmpeg_path)]
-    cmd.extend(["-y"])  # overwrite output without prompting
+    cmd.extend(["-n"])  # refuse to overwrite an existing output
     cmd.extend(["-framerate", f"{effective_fps:.6f}"])
+    if start_number is not None:
+        if isinstance(start_number, bool) or start_number < 0:
+            raise ValueError("start_number must be nonnegative")
+        cmd.extend(["-start_number", str(start_number)])
     cmd.extend(["-i", str(input_pattern)])
     cmd.extend(["-c:v", codec])
     cmd.extend(["-pix_fmt", pix_fmt])
@@ -226,21 +231,62 @@ def export_to_mp4(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Verify at least one input frame matches the pattern.
-    import re
-
-    # Convert %04d-style pattern to a regex for matching existing files.
-    pattern_regex = re.escape(str(input_pattern)).replace(r"%04d", r"(\d{4})")
-    pattern_regex = pattern_regex.replace(r"%03d", r"(\d{3})")
-    pattern_regex = pattern_regex.replace(r"%02d", r"(\d{2})")
-    pattern_regex = pattern_regex.replace(r"%d", r"(\d+)")
-
-    matching = list(frame_dir.glob("*.png"))
-    if not matching:
+    # Check the precise filename pattern, numbered input range and integrity.
+    if Path(input_pattern).name != input_pattern or input_pattern.count("%") != 1:
+        raise ValueError("input_pattern must be a filename with one %0Nd or %d")
+    match = re.fullmatch(r"(.*?)%0?(\d*)d(.*?)", input_pattern)
+    if match is None:
+        raise ValueError("input_pattern must contain a valid %0Nd or %d token")
+    prefix, width_text, suffix = match.groups()
+    number_regex = r"\d+" if not width_text else rf"\d{{{int(width_text)}}}"
+    frame_regex = re.compile(
+        "^" + re.escape(prefix) + "(" + number_regex + ")" + re.escape(suffix) + "$"
+    )
+    frame_numbers = sorted(
+        int(found.group(1))
+        for file in frame_dir.iterdir() if file.is_file()
+        if (found := frame_regex.fullmatch(file.name)) is not None
+    )
+    if not frame_numbers:
         raise FileNotFoundError(
-            f"no PNG frames found in {frame_dir} matching pattern "
-            f"{input_pattern!r}"
+            f"no PNG frames found in {frame_dir} matching {input_pattern!r}"
         )
+    first, last = frame_numbers[0], frame_numbers[-1]
+    if frame_numbers != list(range(first, last + 1)):
+        raise ValueError(
+            f"frame sequence has missing or duplicate numbers between {first} and {last}"
+        )
+    for number in frame_numbers:
+        filename = frame_dir / (
+            prefix + str(number).zfill(int(width_text or 0)) + suffix
+        )
+        if filename.stat().st_size <= 8:
+            raise ValueError(f"frame is empty or truncated: {filename}")
+        with filename.open("rb") as handle:
+            if handle.read(8) != b"\x89PNG\r\n\x1a\n":
+                raise ValueError(f"frame is not a PNG file: {filename}")
+
+    manifest_path = frame_dir / "render_manifest.json"
+    if manifest_path.exists():
+        from core.exporting.manifest import RenderManifest
+
+        manifest = RenderManifest.load(manifest_path)
+        if prefix != f"{manifest.stem}_":
+            raise ValueError("frame filename stem differs from render manifest")
+        expected = set(range(manifest.frame_start, manifest.frame_end + 1))
+        if not expected.issubset(frame_numbers):
+            raise ValueError("render manifest frame range is not complete")
+        if not expected.issubset(manifest.verified_frames(frame_dir)):
+            raise ValueError("render manifest contains unverified frames")
+
+    # A unique output path is chosen even if the API is used directly.
+    requested = output_path
+    suffix_index = 1
+    while output_path.exists():
+        output_path = requested.with_name(
+            f"{requested.stem}_{suffix_index:03d}{requested.suffix}"
+        )
+        suffix_index += 1
 
     cmd = build_ffmpeg_command(
         input_pattern=frame_dir / input_pattern,
@@ -250,6 +296,7 @@ def export_to_mp4(
         ffmpeg_path=resolved_ffmpeg,
         crf=crf,
         preset=preset,
+        start_number=first,
     )
 
     result = subprocess.run(

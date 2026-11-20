@@ -217,7 +217,7 @@ def test_render_frames_incompatible_manifest_raises(tmp_path: Path) -> None:
 
 
 def test_render_frames_no_resume_renders_all(tmp_path: Path) -> None:
-    """With --no-resume equivalent, all frames render even if manifest exists."""
+    """--no-resume must not overwrite previously rendered frames."""
     import bpy
 
     blend_path = tmp_path / "test_scene_noresume.blend"
@@ -240,22 +240,25 @@ def test_render_frames_no_resume_renders_all(tmp_path: Path) -> None:
         stem="frame",
     )
 
-    # Second render with resume=False should re-render everything.
-    result = render_frames(
-        blend_path=blend_path,
-        frame_dir=frame_dir,
-        frame_start=1,
-        frame_end=3,
-        fps=24.0,
-        fps_base=1.0,
-        resolution_x=960,
-        resolution_y=540,
-        manifest_path=manifest_path,
-        stem="frame",
-        resume=False,
-    )
-    assert result["frames_rendered"] == 3
-    assert result["frames_skipped"] == 0
+    # Re-rendering into the same directory could overwrite valuable images.
+    try:
+        render_frames(
+            blend_path=blend_path,
+            frame_dir=frame_dir,
+            frame_start=1,
+            frame_end=3,
+            fps=24.0,
+            fps_base=1.0,
+            resolution_x=960,
+            resolution_y=540,
+            manifest_path=manifest_path,
+            stem="frame",
+            resume=False,
+        )
+    except Exception as exc:
+        assert "new output directory" in str(exc)
+    else:
+        raise AssertionError("Expected output protection for --no-resume")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -286,10 +289,94 @@ def main(argv: list[str] | None = None) -> int:
     test_render_frames_resume_skips_completed(tmp_dir)
     test_render_frames_incompatible_manifest_raises(tmp_dir)
     test_render_frames_no_resume_renders_all(tmp_dir)
+    test_render_frames_restores_deleted_frame(tmp_dir)
+    test_fractional_fps_preserved_inside_blender(tmp_dir)
+    test_render_frames_changed_blend_rejects_resume(tmp_dir)
+    test_render_frames_corrupt_png_refuses_resume(tmp_dir)
 
     print("All Blender frame-render integration tests PASSED")
     return 0
 
 
+
+def test_render_frames_restores_deleted_frame(tmp_path: Path) -> None:
+    """Resume recreates missing frames instead of incorrectly skipping them."""
+    blend = tmp_path / "test_scene_deleted.blend"
+    folder = tmp_path / "deleted_frames"
+    _make_minimal_scene(blend)
+    render_frames(
+        blend_path=blend, frame_dir=folder, frame_start=1, frame_end=3,
+        resolution_x=320, resolution_y=180
+    )
+    (folder / "frame_0002.png").unlink()
+    result = render_frames(
+        blend_path=blend, frame_dir=folder, frame_start=1, frame_end=3,
+        resolution_x=320, resolution_y=180
+    )
+    assert result["frames_rendered"] == 1
+    assert result["frames_skipped"] == 2
+    assert (folder / "frame_0002.png").is_file()
+
+
+def test_fractional_fps_preserved_inside_blender(tmp_path: Path) -> None:
+    blend = tmp_path / "fractional_scene.blend"
+    folder = tmp_path / "fractional_frames"
+    _make_minimal_scene(blend)
+    render_frames(
+        blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+        fps=23.976, fps_base=1, resolution_x=320, resolution_y=180,
+    )
+    import bpy
+    effective = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
+    assert abs(effective - 23.976) < 1e-5
+
+
+
+
+def test_render_frames_changed_blend_rejects_resume(tmp_path: Path) -> None:
+    """Same path with changed scene bytes must never reuse old frames."""
+    blend = tmp_path / "test_scene_modified.blend"
+    folder = tmp_path / "modified_frames"
+    _make_minimal_scene(blend)
+    render_frames(
+        blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+        resolution_x=320, resolution_y=180,
+    )
+    with blend.open("ab") as handle:
+        handle.write(b"changed scene source")
+    try:
+        render_frames(
+            blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+            resolution_x=320, resolution_y=180,
+        )
+    except Exception as exc:
+        assert "incompatible" in str(exc).lower()
+    else:
+        raise AssertionError("Expected incompatible source .blend hash")
+
+
+def test_render_frames_corrupt_png_refuses_resume(tmp_path: Path) -> None:
+    """A corrupt existing image is never silently overwritten or skipped."""
+    blend = tmp_path / "test_scene_corrupt.blend"
+    folder = tmp_path / "corrupt_frames"
+    _make_minimal_scene(blend)
+    render_frames(
+        blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+        resolution_x=320, resolution_y=180,
+    )
+    image = folder / "frame_0001.png"
+    image.write_bytes(b"corrupted-image-bytes")
+    try:
+        render_frames(
+            blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+            resolution_x=320, resolution_y=180,
+        )
+    except Exception as exc:
+        assert "differs" in str(exc).lower()
+    else:
+        raise AssertionError("Expected PNG checksum mismatch")
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -72,7 +72,8 @@ def test_build_ffmpeg_command_defaults() -> None:
     )
 
     assert cmd[0] == "ffmpeg"
-    assert "-y" in cmd
+    assert "-n" in cmd
+    assert "-y" not in cmd
     assert "-framerate" in cmd
     assert "24.000000" in cmd
     assert "-i" in cmd
@@ -158,3 +159,87 @@ def test_ffmpeg_available_false_when_not_installed() -> None:
     # simply returns True and is still correct.
     result = ffmpeg_available()
     assert isinstance(result, bool)
+
+
+def test_build_ffmpeg_command_rejects_nonfinite_fps() -> None:
+    for invalid in (float("inf"), float("-inf"), float("nan")):
+        with pytest.raises(ValueError, match="effective FPS"):
+            build_ffmpeg_command(
+                input_pattern="frame_%04d.png", output_path="video.mp4",
+                fps=invalid,
+            )
+
+
+def test_export_rejects_gapped_frames(tmp_path: Path, monkeypatch) -> None:
+    from core.exporting import video
+
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    for i in (1, 3):
+        (frame_dir / f"frame_{i:04d}.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n" + b"data"
+        )
+    monkeypatch.setattr(video, "find_ffmpeg", lambda unused: "ffmpeg")
+    with pytest.raises(ValueError, match="missing"):
+        video.export_to_mp4(
+            frame_dir=frame_dir, output_path=tmp_path / "out.mp4", fps=24
+        )
+
+
+def test_export_uses_first_frame_and_avoids_overwrite(tmp_path: Path, monkeypatch) -> None:
+    from core.exporting import video
+    import subprocess
+
+    frames = tmp_path / "frames"
+    frames.mkdir()
+    for i in (12, 13):
+        (frames / f"frame_{i:04d}.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n" + b"data"
+        )
+    existing = tmp_path / "movie.mp4"
+    existing.write_bytes(b"existing original")
+
+    monkeypatch.setattr(video, "find_ffmpeg", lambda unused: "ffmpeg")
+    recorded = []
+
+    def fake_run(args, **kwargs):
+        recorded.append(args)
+        Path(args[-1]).write_bytes(b"mock mp4")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(video.subprocess, "run", fake_run)
+    result = video.export_to_mp4(
+        frame_dir=frames, output_path=existing, fps=24
+    )
+    assert result.name == "movie_001.mp4"
+    assert existing.read_bytes() == b"existing original"
+    assert "-n" in recorded[0]
+    assert recorded[0][recorded[0].index("-start_number") + 1] == "12"
+
+
+def test_ffmpeg_check_does_not_require_export_arguments(monkeypatch) -> None:
+    from scripts import export_video
+    monkeypatch.setattr(export_video, "ffmpeg_available", lambda path: True)
+    monkeypatch.setattr(export_video, "find_ffmpeg", lambda path: "ffmpeg")
+    assert export_video.main(["--check-ffmpeg"]) == 0
+
+
+def test_ffmpeg_check_reads_real_sys_argv(monkeypatch, capsys) -> None:
+    """Regression: uv run python scripts/export_video.py --check-ffmpeg."""
+    from scripts import export_video
+    monkeypatch.setattr(export_video.sys, "argv", [
+        "scripts/export_video.py", "--check-ffmpeg"
+    ])
+    monkeypatch.setattr(export_video, "ffmpeg_available", lambda path: True)
+    monkeypatch.setattr(export_video, "find_ffmpeg", lambda path: "ffmpeg")
+    assert export_video.main() == 0
+    assert "FFmpeg available:" in capsys.readouterr().out
+
+
+def test_ffmpeg_check_blender_separator_still_supported(monkeypatch) -> None:
+    from scripts import export_video
+    monkeypatch.setattr(export_video.sys, "argv", [
+        "blender", "--background", "--", "--check-ffmpeg"
+    ])
+    monkeypatch.setattr(export_video, "ffmpeg_available", lambda path: False)
+    assert export_video.main() == 1
