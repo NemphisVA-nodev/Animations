@@ -3,7 +3,13 @@
 import numpy as np
 import pytest
 
-from blender.cinematic_paths import camera_plan, trail_reveal_windows
+from blender.cinematic_paths import (
+    camera_plan,
+    cinematic_camera_fit,
+    estimate_visual_scale,
+    select_still_frame,
+    trail_reveal_windows,
+)
 
 
 def test_trail_reveals_only_past_frames() -> None:
@@ -118,3 +124,160 @@ def test_default_startup_object_names() -> None:
     assert "Camera" in DEFAULT_STARTUP_OBJECTS
     assert "Light" in DEFAULT_STARTUP_OBJECTS
     assert len(DEFAULT_STARTUP_OBJECTS) == 3
+
+
+def test_auto_still_prefers_particles_outside_schematic_core() -> None:
+    """Select the frame with visible particles, not a later invisible frame."""
+    positions = np.zeros((5, 2, 3), dtype=float)
+    positions[:, 0, 0] = [3, 2.5, 1.3, 0.4, 0.3]
+    positions[:, 1, 0] = [0.2, 1.8, 0.4, 0.3, 0.2]
+    valid = np.ones((5, 2), dtype=bool)
+    frame, visible = select_still_frame(
+        positions, valid, active_frames=5,
+    )
+    assert frame == 2
+    assert visible == 2
+
+
+def test_auto_still_returns_warning_count_when_scale_too_small() -> None:
+    positions = np.zeros((4, 2, 3), dtype=float)
+    positions[:, :, 0] = 0.2
+    frame, visible = select_still_frame(
+        positions, np.ones((4, 2), dtype=bool), active_frames=4,
+    )
+    assert 1 <= frame <= 4
+    assert visible == 0
+
+
+def test_auto_still_ignores_terminated_nan_particles() -> None:
+    positions = np.array(
+        [[[3.0, 0.0, 0.0]], [[2.0, 0.0, 0.0]], [[np.nan, np.nan, np.nan]]]
+    )
+    valid = np.array([[True], [True], [False]])
+    frame, visible = select_still_frame(positions, valid, active_frames=3)
+    # Both frames 1 and 2 are visible; the early-mid tie-break picks frame 2.
+    assert frame == 2
+    assert visible == 1
+
+
+def test_auto_still_excludes_hold_frames() -> None:
+    positions = np.zeros((6, 1, 3), dtype=float)
+    positions[:, 0, 0] = 3.0
+    valid = np.ones((6, 1), dtype=bool)
+    frame, visible = select_still_frame(positions, valid, active_frames=3)
+    assert frame <= 3
+    assert visible == 1
+
+
+def test_auto_still_rejects_wrong_shapes() -> None:
+    with pytest.raises(ValueError, match="shape"):
+        select_still_frame(np.zeros((2, 3)), np.zeros((2, 1), dtype=bool), active_frames=2)
+
+
+def test_auto_still_rejects_invalid_radius() -> None:
+    with pytest.raises(ValueError, match="core_radius"):
+        select_still_frame(
+            np.zeros((2, 1, 3)),
+            np.ones((2, 1), dtype=bool),
+            active_frames=2,
+            core_radius=-1,
+        )
+
+
+def test_auto_scale_fits_typical_initial_particle_radius() -> None:
+    positions = np.array(
+        [[[4e6, 0.0], [0.0, 4e6], [0.0, 1e9]]], dtype=float
+    )
+    mask = np.ones((1, 3), dtype=bool)
+    original = positions.copy()
+    scale = estimate_visual_scale(positions, mask)
+    assert scale == pytest.approx(1e-6)
+    assert np.array_equal(positions, original), "visual scale changed source data"
+
+
+def test_auto_scale_ignores_invalid_nan_particle() -> None:
+    positions = np.array([[[4e6, 0.0], [np.nan, np.nan]]])
+    mask = np.array([[True, False]])
+    assert estimate_visual_scale(positions, mask) == pytest.approx(1e-6)
+
+
+def test_auto_scale_does_not_use_later_infall_radius() -> None:
+    positions = np.array(
+        [[[4e6, 0.0]], [[2e6, 0.0]], [[1e6, 0.0]]], dtype=float
+    )
+    mask = np.ones((3, 1), dtype=bool)
+    assert estimate_visual_scale(positions, mask) == pytest.approx(1e-6)
+
+
+@pytest.mark.parametrize(
+    ("positions", "mask", "message"),
+    [
+        (np.zeros((2, 2)), np.ones((2, 1), dtype=bool), "shape"),
+        (np.zeros((2, 1, 2)), np.ones((1, 1), dtype=bool), "shape"),
+        (np.zeros((0, 1, 2)), np.zeros((0, 1), dtype=bool), "frames"),
+        (np.zeros((1, 1, 2)), np.zeros((1, 1), dtype=bool), "no valid"),
+        (np.zeros((1, 1, 2)), np.ones((1, 1), dtype=bool), "nonzero"),
+        (
+            np.array([[[np.nan, 0.0]]]),
+            np.ones((1, 1), dtype=bool),
+            "finite",
+        ),
+    ],
+)
+def test_auto_scale_rejects_unusable_initial_conditions(
+    positions, mask, message
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        estimate_visual_scale(positions, mask)
+
+
+@pytest.mark.parametrize("target_radius", [0.0, -3.0, np.nan, np.inf])
+def test_auto_scale_rejects_invalid_target_radius(target_radius) -> None:
+    with pytest.raises(ValueError, match="target_start_radius"):
+        estimate_visual_scale(
+            np.array([[[4e6, 0.0]]]),
+            np.ones((1, 1), dtype=bool),
+            target_start_radius=target_radius,
+        )
+
+
+def test_cinematic_camera_fit_includes_ring_and_distant_particles() -> None:
+    positions = np.array([[[4.0, 0.0, 0.0], [7.0, 0.0, 0.0]]])
+    valid = np.ones((1, 2), dtype=bool)
+    cx, cy, width = cinematic_camera_fit(positions, valid)
+    half_width = width / 2
+    half_height = width / (2 * (16 / 9))
+    assert cx - half_width < -2.12
+    assert cx + half_width > 7.0 + 0.115
+    assert cy - half_height < -2.12
+    assert cy + half_height > 2.12
+
+
+def test_cinematic_camera_fit_is_symmetric_for_central_dataset() -> None:
+    pos = np.array([[[0.0, 0.0, 0.0]]])
+    centre_x, centre_y, width = cinematic_camera_fit(
+        pos, np.array([[True]])
+    )
+    assert centre_x == pytest.approx(0.0)
+    assert centre_y == pytest.approx(0.0)
+    assert width > 2 * 2.12 * 16 / 9
+
+
+def test_cinematic_camera_fit_ignores_terminated_nan() -> None:
+    pos = np.array([[[4., 0., 0.]], [[np.nan, np.nan, np.nan]]])
+    valid = np.array([[True], [False]])
+    cx, cy, width = cinematic_camera_fit(pos, valid)
+    assert np.isfinite([cx, cy, width]).all()
+
+
+@pytest.mark.parametrize("padding", [0, 1, np.nan, np.inf])
+def test_cinematic_camera_fit_rejects_bad_padding(padding) -> None:
+    pos = np.zeros((1, 1, 3), dtype=float)
+    with pytest.raises(ValueError, match="padding"):
+        cinematic_camera_fit(pos, np.ones((1, 1), bool), padding=padding)
+
+
+def test_cinematic_camera_fit_rejects_no_valid_points() -> None:
+    pos = np.zeros((1, 1, 3), dtype=float)
+    with pytest.raises(ValueError, match="no valid"):
+        cinematic_camera_fit(pos, np.zeros((1, 1), bool))
