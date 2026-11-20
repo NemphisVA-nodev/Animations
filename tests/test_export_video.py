@@ -222,3 +222,24 @@ def test_ffmpeg_check_does_not_require_export_arguments(monkeypatch) -> None:
     monkeypatch.setattr(export_video, "ffmpeg_available", lambda path: True)
     monkeypatch.setattr(export_video, "find_ffmpeg", lambda path: "ffmpeg")
     assert export_video.main(["--check-ffmpeg"]) == 0
+
+
+def test_ffmpeg_check_reads_real_sys_argv(monkeypatch, capsys) -> None:
+    """Regression: uv run python scripts/export_video.py --check-ffmpeg."""
+    from scripts import export_video
+    monkeypatch.setattr(export_video.sys, "argv", [
+        "scripts/export_video.py", "--check-ffmpeg"
+    ])
+    monkeypatch.setattr(export_video, "ffmpeg_available", lambda path: True)
+    monkeypatch.setattr(export_video, "find_ffmpeg", lambda path: "ffmpeg")
+    assert export_video.main() == 0
+    assert "FFmpeg available:" in capsys.readouterr().out
+
+
+def test_ffmpeg_check_blender_separator_still_supported(monkeypatch) -> None:
+    from scripts import export_video
+    monkeypatch.setattr(export_video.sys, "argv", [
+        "blender", "--background", "--", "--check-ffmpeg"
+    ])
+    monkeypatch.setattr(export_video, "ffmpeg_available", lambda path: False)
+    assert export_video.main() == 1

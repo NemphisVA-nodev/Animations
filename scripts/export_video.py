@@ -74,10 +74,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if argv is None:
-        if "--" in sys.argv:
-            argv = sys.argv[sys.argv.index("--") + 1 :]
-        else:
-            argv = []
+        # Blender-style invocations use '--'; ordinary Python/uv invocations
+        # pass options directly after the script name.
+        argv = (
+            sys.argv[sys.argv.index("--") + 1:]
+            if "--" in sys.argv else sys.argv[1:]
+        )
 
     args = parser.parse_args(argv)
 
