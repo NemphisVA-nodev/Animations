@@ -34,10 +34,12 @@ except ImportError:  # Outside Blender: only pure helpers are unit tested.
 from blender.animator import Animator, require_bpy  # noqa: E402
 from blender.cinematic_paths import (  # noqa: E402
     cinematic_camera_fit,
+    decorative_disk_arc,
     estimate_visual_scale,
     select_still_frame,
     visible_infall_window_end,
     trail_reveal_windows,
+    trail_width_profile,
 )
 from blender.importer import (  # noqa: E402
     SCALE_DEFAULT,
@@ -217,10 +219,12 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     curve.bevel_factor_mapping_end = "RESOLUTION"
     spline = curve.splines.new("POLY")
     spline.points.add(count - 1)
+    width_factors = trail_width_profile(count)
     for idx, point in enumerate(sampled_xyz[:count]):
         spline.points[idx].co = (
             float(point[0]), float(point[1]), 0.14, 1.0
         )
+        spline.points[idx].radius = float(width_factors[idx])
 
     obj = bpy.data.objects.new(pid + "_Trail", curve)
     collection.objects.link(obj)
@@ -256,6 +260,67 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
                         for key in fcurve.keyframe_points:
                             key.interpolation = mode
     return obj
+
+
+
+def _make_schematic_disk_glints(collection, final_frame: int) -> None:
+    """Create two cheap, stylized highlights orbiting over tilted glow rings.
+
+    Their animation is deliberate art direction, not a Newtonian disk model,
+    relativistic lensing, or astrophysical accretion-flow computation.
+    """
+    if final_frame < 2:
+        return
+    tilt = bpy.data.objects.new("Cinematic_Disk_Highlight_Plane", None)
+    collection.objects.link(tilt)
+    tilt.rotation_euler = (0.30, 0.0, 0.0)
+    tilt["visual_classification"] = "SCHEMATIC decorative highlight plane"
+    specs = (
+        ("Inner", 1.15, 0.10, 0.52, 1.00, RING_COLORS[1]),
+        ("Outer", 1.50, 2.25, 0.40, 0.65, RING_COLORS[0]),
+    )
+    for name, radius, angle, span, revolutions, color in specs:
+        arc, widths = decorative_disk_arc(
+            radius, start_angle=angle, span_angle=span
+        )
+        curve = bpy.data.curves.new(
+            f"Cinematic_Disk_{name}_Highlight_Geometry", "CURVE"
+        )
+        curve.dimensions = "3D"
+        curve.resolution_u = 1
+        curve.bevel_depth = 0.027
+        curve.bevel_resolution = 2
+        spline = curve.splines.new("POLY")
+        spline.points.add(len(arc) - 1)
+        for idx, ((x, y, z), width) in enumerate(zip(arc, widths)):
+            spline.points[idx].co = (float(x), float(y), float(z), 1.0)
+            spline.points[idx].radius = float(width)
+
+        obj = bpy.data.objects.new(
+            f"Cinematic_Disk_{name}_Highlight", curve
+        )
+        collection.objects.link(obj)
+        obj.parent = tilt
+        curve.materials.append(_emission_material(
+            f"Cinematic_Disk_{name}_Highlight_Mat", color, 2.8
+        ))
+        obj["visual_classification"] = (
+            "SCHEMATIC moving glint; not simulated accretion flow"
+        )
+        obj.rotation_euler.z = 0.0
+        obj.keyframe_insert(data_path="rotation_euler", frame=1)
+        obj.rotation_euler.z = float(2 * np.pi * revolutions)
+        obj.keyframe_insert(data_path="rotation_euler", frame=final_frame)
+
+        action = obj.animation_data.action
+        for layer in action.layers:
+            for strip in layer.strips:
+                if strip.type != "KEYFRAME":
+                    continue
+                for bag in strip.channelbags:
+                    for fcurve in bag.fcurves:
+                        for key in fcurve.keyframe_points:
+                            key.interpolation = "LINEAR"
 
 
 def _configure_camera(target_x, target_y, ortho_width, collection):
@@ -318,6 +383,7 @@ def build_cinematic_scene(
     quality: str = "draft",
     fit_visible_motion: bool = False,
     motion_fraction: float = 0.8,
+    animated_disk: bool = False,
 ) -> dict[str, object]:
     """Build a self-contained scene from Step 5B's validated particle positions.
 
@@ -418,6 +484,10 @@ def build_cinematic_scene(
             radius, thickness, height, RING_COLORS[number], collection
         )
 
+    if animated_disk:
+        _make_schematic_disk_glints(collection, mapping.total_frames)
+    bpy.context.scene["schematic_disk_highlights_enabled"] = bool(animated_disk)
+
     for index, pid in enumerate(data.particle_ids):
         color = PARTICLE_COLORS[index % len(PARTICLE_COLORS)]
         # Reuse the per-particle material but switch to emission for visibility.
@@ -481,6 +551,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Part of --duration used for visible infall (default 0.8).",
     )
     parser.add_argument("--trail-frames", type=int, default=14)
+    parser.add_argument(
+        "--animated-disk", action="store_true",
+        help="Add schematic orbiting ring glints (decorative, not physical).",
+    )
     parser.add_argument("--quality", choices=("draft", "final"), default="draft")
     parser.add_argument("--output", default=None, help="Optional .blend output path.")
     parser.add_argument(
@@ -519,6 +593,7 @@ def main(argv: list[str] | None = None) -> int:
         quality=args.quality,
         fit_visible_motion=args.fit_visible_motion,
         motion_fraction=args.motion_fraction,
+        animated_disk=args.animated_disk,
     )
 
     requested = args.output or default_blend_output(
