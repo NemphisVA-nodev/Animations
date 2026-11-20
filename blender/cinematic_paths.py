@@ -96,3 +96,60 @@ def camera_plan(
         float(min_half_extent),
     )
     return center_x, center_y, half_extent
+
+
+def select_still_frame(
+    scaled_positions_xyz: np.ndarray,
+    validity_mask: np.ndarray,
+    *,
+    active_frames: int,
+    core_radius: float = 0.62,
+    particle_radius: float = 0.425,
+) -> tuple[int, int]:
+    """Choose a 1-based still frame and count particles outside the core.
+
+    The selection only changes *which existing simulated frame* is shown.
+    It does not adjust positions, validity or simulation timing.
+
+    Frames with the most visible particle centres outside the schematic core
+    are preferred. Among ties, choose the one closest to 30% into the active
+    sequence, giving trails some time to develop. If all particle centres are
+    too close to the core, return the earliest frame with the most valid
+    particles and a zero visible count; callers can warn about the scale.
+    """
+    positions = np.asarray(scaled_positions_xyz, dtype=np.float64)
+    mask = np.asarray(validity_mask)
+    if positions.ndim != 3 or positions.shape[-1] != 3:
+        raise ValueError("scaled_positions_xyz must have shape (T, N, 3)")
+    if mask.shape != positions.shape[:2] or mask.dtype.kind != "b":
+        raise ValueError("validity_mask must be boolean with shape (T, N)")
+    if isinstance(active_frames, (bool, np.bool_)) or not isinstance(
+        active_frames, (int, np.integer)
+    ) or not 1 <= active_frames <= positions.shape[0]:
+        raise ValueError("active_frames must be between 1 and the total frame count")
+    if any(not np.isfinite(x) or x < 0 for x in (core_radius, particle_radius)):
+        raise ValueError("core_radius and particle_radius must be finite and nonnegative")
+
+    valid_pos = positions[mask]
+    if valid_pos.size == 0:
+        raise ValueError("no valid particle positions available for still preview")
+    if not np.all(np.isfinite(valid_pos)):
+        raise ValueError("valid particle positions must be finite")
+
+    # Ignore invalid NaN positions so terminated particles never score.
+    positions_active = np.where(mask[:active_frames, :, None], positions[:active_frames], 0.0)
+    distance = np.linalg.norm(positions_active[:, :, :2], axis=2)
+    outside = mask[:active_frames] & (distance > core_radius + particle_radius)
+    visible_count = np.count_nonzero(outside, axis=1)
+    max_visible = int(np.max(visible_count))
+    scores = visible_count
+    if max_visible == 0:
+        # The caller can warn that visual scale is hiding every particle.
+        scores = np.count_nonzero(mask[:active_frames], axis=1)
+    if np.max(scores) == 0:
+        raise ValueError("no active frame contains a valid particle")
+
+    preferred_index = round((active_frames - 1) * 0.30)
+    candidates = np.flatnonzero(scores == np.max(scores))
+    winner = int(min(candidates, key=lambda i: (abs(int(i) - preferred_index), i)))
+    return winner + 1, max_visible

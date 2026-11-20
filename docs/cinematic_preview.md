@@ -104,3 +104,17 @@ and collision-safe file naming. `blender/tests/test_cinematic_integration.py`
 is a Blender-only smoke test and must run in the actual Blender installation
 before merging. A passed Python suite alone is not evidence of rendered
 visual correctness.
+
+
+## Still-frame selection (trajectory visibility polish)
+
+`--render-still` now selects a frame with the largest number of **valid
+calculated particle centres outside the schematic black-hole core**. This is
+only a preview frame selection: no physical positions or times are changed.
+
+For a specific frame, pass `--still-frame 12 --render-still` (Blender frame
+numbers start at 1). It is useful for comparing early infall to late infall.
+If all particles are hidden inside the decorative core at the chosen
+`--scale`, the script prints a warning and suggests increasing the *visual*
+scale (for instance, from `5e-8` to `1e-6`). A visual scale change does not
+change the trajectory dataset.

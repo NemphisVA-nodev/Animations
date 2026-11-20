@@ -32,7 +32,11 @@ except ImportError:  # Outside Blender: only pure helpers are unit tested.
     Vector = None
 
 from blender.animator import Animator, require_bpy  # noqa: E402
-from blender.cinematic_paths import camera_plan, trail_reveal_windows  # noqa: E402
+from blender.cinematic_paths import (  # noqa: E402
+    camera_plan,
+    select_still_frame,
+    trail_reveal_windows,
+)
 from blender.importer import (  # noqa: E402
     SCALE_DEFAULT,
     load_trajectory,
@@ -354,6 +358,16 @@ def build_cinematic_scene(
     )
     scaled_xyz = metres_to_blender(sampled, scale)
 
+    # Recommend a still frame where the calculated particles are outside the
+    # schematic core (rather than blindly choosing frame 45%).
+    suggested_frame, visible_count = select_still_frame(
+        scaled_xyz,
+        mask,
+        active_frames=mapping.num_frames,
+    )
+    bpy.context.scene["recommended_still_frame"] = suggested_frame
+    bpy.context.scene["recommended_still_visible_particles"] = visible_count
+
     collection = _visual_collection()
     _darken_black_hole(particles[animator.bh_marker_name])
     particles[animator.bh_marker_name].scale = (0.62, 0.62, 0.62)
@@ -422,11 +436,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", default=None, help="Optional .blend output path.")
     parser.add_argument(
         "--render-still", action="store_true",
-        help="Also render one PNG at roughly the middle of the active animation.",
+        help="Also render one PNG, automatically choosing a frame with visible particles.",
+    )
+    parser.add_argument(
+        "--still-frame", type=int, default=None,
+        help="Render a specific Blender frame (1-based); requires --render-still.",
     )
     if argv is None:
         argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     args = parser.parse_args(argv)
+    if args.still_frame is not None and not args.render_still:
+        parser.error("--still-frame requires --render-still")
 
     build_cinematic_scene(
         args.dataset,
@@ -450,9 +470,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.render_still:
         scene = bpy.context.scene
-        frame = min(scene.frame_end, 1 + round(
-            (scene.frame_end - 1) * 0.45
-        ))
+        frame = (
+            args.still_frame
+            if args.still_frame is not None
+            else int(scene["recommended_still_frame"])
+        )
+        if not scene.frame_start <= frame <= scene.frame_end:
+            parser.error(
+                f"--still-frame must be between {scene.frame_start} "
+                f"and {scene.frame_end}"
+            )
+        if int(scene["recommended_still_visible_particles"]) == 0:
+            print(
+                "WARNING: all sampled particle centres are within the "
+                "schematic black-hole core at the current --scale; "
+                "try a larger --scale, such as 1e-6."
+            )
+        print(f"Rendering still at Blender frame {frame}")
         scene.frame_set(frame)
         png_path = next_available_png_path(
             blend_path.with_name(blend_path.stem + "_still.png")

@@ -3,7 +3,11 @@
 import numpy as np
 import pytest
 
-from blender.cinematic_paths import camera_plan, trail_reveal_windows
+from blender.cinematic_paths import (
+    camera_plan,
+    select_still_frame,
+    trail_reveal_windows,
+)
 
 
 def test_trail_reveals_only_past_frames() -> None:
@@ -118,3 +122,60 @@ def test_default_startup_object_names() -> None:
     assert "Camera" in DEFAULT_STARTUP_OBJECTS
     assert "Light" in DEFAULT_STARTUP_OBJECTS
     assert len(DEFAULT_STARTUP_OBJECTS) == 3
+
+
+def test_auto_still_prefers_particles_outside_schematic_core() -> None:
+    """Select the frame with visible particles, not a later invisible frame."""
+    positions = np.zeros((5, 2, 3), dtype=float)
+    positions[:, 0, 0] = [3, 2.5, 1.3, 0.4, 0.3]
+    positions[:, 1, 0] = [0.2, 1.8, 0.4, 0.3, 0.2]
+    valid = np.ones((5, 2), dtype=bool)
+    frame, visible = select_still_frame(
+        positions, valid, active_frames=5,
+    )
+    assert frame == 2
+    assert visible == 2
+
+
+def test_auto_still_returns_warning_count_when_scale_too_small() -> None:
+    positions = np.zeros((4, 2, 3), dtype=float)
+    positions[:, :, 0] = 0.2
+    frame, visible = select_still_frame(
+        positions, np.ones((4, 2), dtype=bool), active_frames=4,
+    )
+    assert 1 <= frame <= 4
+    assert visible == 0
+
+
+def test_auto_still_ignores_terminated_nan_particles() -> None:
+    positions = np.array(
+        [[[3.0, 0.0, 0.0]], [[2.0, 0.0, 0.0]], [[np.nan, np.nan, np.nan]]]
+    )
+    valid = np.array([[True], [True], [False]])
+    frame, visible = select_still_frame(positions, valid, active_frames=3)
+    assert frame == 1
+    assert visible == 1
+
+
+def test_auto_still_excludes_hold_frames() -> None:
+    positions = np.zeros((6, 1, 3), dtype=float)
+    positions[:, 0, 0] = 3.0
+    valid = np.ones((6, 1), dtype=bool)
+    frame, visible = select_still_frame(positions, valid, active_frames=3)
+    assert frame <= 3
+    assert visible == 1
+
+
+def test_auto_still_rejects_wrong_shapes() -> None:
+    with pytest.raises(ValueError, match="shape"):
+        select_still_frame(np.zeros((2, 3)), np.zeros((2, 1), dtype=bool), active_frames=2)
+
+
+def test_auto_still_rejects_invalid_radius() -> None:
+    with pytest.raises(ValueError, match="core_radius"):
+        select_still_frame(
+            np.zeros((2, 1, 3)),
+            np.ones((2, 1), dtype=bool),
+            active_frames=2,
+            core_radius=-1,
+        )
