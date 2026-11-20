@@ -160,3 +160,37 @@ the actual camera to guard against cropping.
 The animation remains a **schematic Newtonian test-particle visualization**.
 This code does not model actual accretion-disk motion, gravitational lensing,
 relativistic black-hole imaging, or gravitational radiation.
+
+
+## Step 5C.4 — Stretch visible infall across the presentation
+
+The `--fit-visible-motion` flag changes **only presentation timing**: it
+looks for the last source sample where at least one valid particle centre
+remains outside the schematic core (radius 0.62 plus marker radius 0.115,
+in Blender visual units), then chooses a physical time window with slight
+padding beyond that event. Blender samples the **same original physical
+trajectory** on a slower presentation clock, and trails follow those samples.
+
+With `--duration 5 --motion-fraction 0.8` (defaults), this creates a
+five-second scene with approximately four seconds of infall and one second
+of ending hold. If particles are still visible at the source dataset's
+final timestamp, it leaves the full physical time window and omits the
+ending hold instead of freezing a visibly moving particle.
+
+```powershell
+$dataset = "outputs/preview_radial_infall_radial_infall"
+& $blender --background --python-exit-code 1 --python blender/cinematic_scene.py -- --dataset $dataset --auto-scale --fit-visible-motion --duration 5 --motion-fraction 0.8 --fps 24 --quality draft
+```
+
+This saves a **new** collision-safe cinematic `.blend`. Inspect its
+`motion_fit_enabled`, `motion_fit_end_sim_time_s`,
+`motion_fit_active_seconds`, and `motion_fit_hold_seconds` scene
+properties. The source dataset is unchanged. The user must render this new
+scene to a **new output frame directory**: an old manifest cannot safely
+be reused with a different `.blend` file. Verify with five frames first,
+then the full frame sequence using the separate export pipeline.
+
+This is not physically slowed infall, relativistic time dilation, or a
+simulation of a deforming/spaghettifying body. It is a documentary editing
+choice: mapping a shorter interval of existing Newtonian motion across more
+seconds of presentation.

@@ -256,3 +256,71 @@ def cinematic_camera_fit(
     # the vertical size is ortho_scale / aspect_ratio.
     horizontal_scale = max(width, height * aspect_ratio) * padding
     return target_x, target_y, horizontal_scale
+
+
+def visible_infall_window_end(
+    timestamps_s: np.ndarray,
+    positions_m: np.ndarray,
+    validity_mask: np.ndarray,
+    *,
+    scale: float,
+    core_radius: float = 0.62,
+    particle_radius: float = 0.115,
+    end_padding_fraction: float = 0.05,
+) -> float | None:
+    """Find a physical end time after the final visibly infalling particle.
+
+    A source particle is visually active only while it remains *valid* and
+    its projected XY centre is outside the schematic core/marker silhouette.
+    The underlying SI trajectory arrays and source timestamps are untouched.
+
+    None means particles remain visible at the last source time, so a shortened
+    physical window would cut off motion; callers should retain the full
+    sequence instead. A little post-event padding ensures the final active
+    video frame is sampled after the final visible source sample.
+    """
+    times = np.asarray(timestamps_s, dtype=np.float64)
+    positions = np.asarray(positions_m, dtype=np.float64)
+    mask = np.asarray(validity_mask)
+    if times.ndim != 1 or times.size < 2 or not np.all(np.isfinite(times)):
+        raise ValueError("timestamps_s must be a finite 1-D array with >=2 samples")
+    if np.any(np.diff(times) <= 0):
+        raise ValueError("timestamps_s must be strictly increasing")
+    if positions.shape != (times.size, mask.shape[1] if mask.ndim == 2 else -1, 2):
+        raise ValueError("positions_m must have shape (T, N, 2)")
+    if mask.shape != positions.shape[:2] or mask.dtype.kind != "b":
+        raise ValueError("validity_mask must be boolean with shape (T, N)")
+    if positions.shape[1] == 0:
+        raise ValueError("positions_m must include at least one particle")
+    if not (np.isfinite(scale) and scale > 0):
+        raise ValueError("scale must be finite and positive")
+    if not (np.isfinite(core_radius) and core_radius >= 0):
+        raise ValueError("core_radius must be finite and nonnegative")
+    if not (np.isfinite(particle_radius) and particle_radius >= 0):
+        raise ValueError("particle_radius must be finite and nonnegative")
+    if not (np.isfinite(end_padding_fraction) and 0 < end_padding_fraction < 0.5):
+        raise ValueError("end_padding_fraction must be between zero and 0.5")
+    if not np.all(np.isfinite(positions[mask])):
+        raise ValueError("valid source positions must be finite")
+
+    xy = np.where(mask[..., None], positions, 0.0)
+    radius = np.hypot(xy[..., 0], xy[..., 1]) * scale
+    visually_active = mask & (radius > core_radius + particle_radius)
+    active_indices = np.flatnonzero(np.any(visually_active, axis=1))
+    if active_indices.size < 2:
+        raise ValueError(
+            "fewer than two visibly active source samples; adjust --scale "
+            "or use ordinary --duration without --fit-visible-motion"
+        )
+
+    last_visible = int(active_indices[-1])
+    if last_visible == times.size - 1:
+        return None
+
+    start = float(times[0])
+    # First source sample after the final visible particle was seen.
+    vanished_at = float(times[last_visible + 1])
+    # Add a brief post-event margin, while keeping all simulation samples
+    # within the source dataset's actual physical-time bounds.
+    padded = start + (vanished_at - start) / (1.0 - end_padding_fraction)
+    return min(float(times[-1]), float(padded))
