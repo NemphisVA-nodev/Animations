@@ -357,3 +357,47 @@ def test_visible_infall_window_rejects_invalid_valid_positions() -> None:
         visible_infall_window_end(
             times, pos, np.ones((3, 1), dtype=bool), scale=1
         )
+
+
+def test_visible_infall_pacing_keeps_120_frames_without_fabricating_positions() -> None:
+    from core.playback import PlaybackSpec, build_frame_mapping
+
+    times = np.arange(7, dtype=float)
+    pos = np.array(
+        [[[6., 0.]], [[5., 0.]], [[4., 0.]], [[2., 0.]],
+         [[0.4, 0.]], [[np.nan, np.nan]], [[np.nan, np.nan]]]
+    )
+    mask = np.array([[True], [True], [True], [True], [True], [False], [False]])
+    end = visible_infall_window_end(times, pos, mask, scale=1)
+    spec = PlaybackSpec(
+        scene_id="pacing_contract", simulation_id=None, fps=24.0,
+        duration_s=4.0, hold_s=1.0,
+        start_sim_time_s=0.0, end_sim_time_s=end,
+    )
+    mapping = build_frame_mapping(spec)
+    assert mapping.num_frames == 96
+    assert mapping.hold_frames == 24
+    assert mapping.total_frames == 120
+    assert mapping.sim_times_s[0] == pytest.approx(0.0)
+    assert np.all(np.diff(mapping.sim_times_s) > 0)
+    assert mapping.sim_times_s[-1] < end
+    assert mapping.all_sim_times_s[-1] == mapping.endpoint_sim_time_s
+    assert np.array_equal(mapping.all_sim_times_s[-24:],
+                          np.full(24, mapping.endpoint_sim_time_s))
+
+
+def test_visible_infall_window_refuses_invalid_shapes() -> None:
+    with pytest.raises(ValueError, match="shape"):
+        visible_infall_window_end(
+            np.arange(4, dtype=float),
+            np.zeros((4, 2)),
+            np.ones((4, 1), dtype=bool),
+            scale=1,
+        )
+    with pytest.raises(ValueError, match="boolean"):
+        visible_infall_window_end(
+            np.arange(4, dtype=float),
+            np.zeros((4, 1, 2)),
+            np.ones((4, 1), dtype=int),
+            scale=1,
+        )

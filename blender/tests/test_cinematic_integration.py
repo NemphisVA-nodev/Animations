@@ -23,7 +23,9 @@ except ImportError:
     bpy = None
 
 from blender.animator import require_bpy
-from blender.cinematic_paths import select_still_frame, trail_reveal_windows
+from blender.cinematic_paths import (
+    select_still_frame, trail_reveal_windows, visible_infall_window_end
+)
 from blender.cinematic_scene import build_cinematic_scene, VISUAL_COLLECTION
 from blender.importer import metres_to_blender
 from blender.output_paths import default_blend_output, next_available_blend_path
@@ -172,12 +174,72 @@ def run_cinematic_test(
     print(f"  saved: {output_path}")
 
 
+def run_visible_motion_pacing_test(
+    dataset_path: str | Path, *, scale: float, fps: float
+) -> None:
+    """Verify the retimed scene still contains real sampled SI trajectories."""
+    require_bpy()
+    source = load_dataset(dataset_path)
+    arr = source.arrays
+    expected_end = visible_infall_window_end(
+        arr["timestamps"], arr["positions"], arr["validity_mask"], scale=scale
+    )
+    if expected_end is None:
+        raise AssertionError(
+            "this smoke dataset does not have an early visible infall ending"
+        )
+
+    objects = build_cinematic_scene(
+        dataset_path, scale=scale, fps=fps, duration_s=5.0,
+        fit_visible_motion=True, motion_fraction=0.8
+    )
+    scene = bpy.context.scene
+    assert scene["motion_fit_enabled"]
+    assert abs(scene["motion_fit_end_sim_time_s"] - expected_end) < 1e-5
+    assert scene["motion_fit_active_seconds"] == 4.0
+    assert scene["motion_fit_hold_seconds"] == 1.0
+    assert scene.frame_end == round(5.0 * fps)
+
+    spec = PlaybackSpec(
+        scene_id="paced_smoke",
+        simulation_id=source.metadata.get("simulation_id"),
+        fps=fps,
+        duration_s=4.0,
+        hold_s=1.0,
+        start_sim_time_s=float(arr["timestamps"][0]),
+        end_sim_time_s=float(expected_end),
+    )
+    mapping = build_frame_mapping(spec)
+    ids = [pid for pid in objects if pid != "BlackHole_Marker"]
+    positions, valid = sample_particle_positions(
+        source, ids, mapping.all_sim_times_s
+    )
+    expected_xyz = metres_to_blender(positions, scale)
+    for index in sorted({0, mapping.num_frames // 2, mapping.num_frames - 1}):
+        scene.frame_set(index + 1)
+        for j, pid in enumerate(ids):
+            assert objects[pid].hide_render == (not bool(valid[index, j]))
+            if valid[index, j]:
+                assert np.allclose(
+                    objects[pid].location[:], expected_xyz[index, j],
+                    rtol=1e-5, atol=1e-5
+                ), f"retimed Blender position differs from source at frame {index + 1}"
+    print(
+        "Motion pacing integration PASSED: "
+        f"{mapping.num_frames} active, {mapping.hold_frames} hold frames"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Cinematic Blender smoke test")
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--scale", type=float, default=1e-6)
     parser.add_argument("--fps", type=float, default=24.0)
     parser.add_argument("--trail-frames", type=int, default=14)
+    parser.add_argument(
+        "--fit-visible-motion-test", action="store_true",
+        help="Test physics-preserving retimed visible infall instead of the standard scene.",
+    )
     parser.add_argument("--output", default=None)
     if argv is None:
         argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
@@ -185,6 +247,11 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output or default_blend_output(
         args.dataset, args.fps, kind="cinematic_smoke"
     )
+    if args.fit_visible_motion_test:
+        run_visible_motion_pacing_test(
+            args.dataset, scale=args.scale, fps=args.fps
+        )
+        return 0
     run_cinematic_test(
         args.dataset,
         scale=args.scale,
