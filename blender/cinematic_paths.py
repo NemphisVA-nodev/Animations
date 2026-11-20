@@ -114,8 +114,8 @@ def select_still_frame(
     Frames with the most visible particle centres outside the schematic core
     are preferred. Among ties, choose the one closest to 30% into the active
     sequence, giving trails some time to develop. If all particle centres are
-    too close to the core, return the earliest frame with the most valid
-    particles and a zero visible count; callers can warn about the scale.
+    too close to the core, choose among frames with the most valid particles
+    and return a zero visible count; callers can warn about the scale.
     """
     positions = np.asarray(scaled_positions_xyz, dtype=np.float64)
     mask = np.asarray(validity_mask)
@@ -137,7 +137,9 @@ def select_still_frame(
         raise ValueError("valid particle positions must be finite")
 
     # Ignore invalid NaN positions so terminated particles never score.
-    positions_active = np.where(mask[:active_frames, :, None], positions[:active_frames], 0.0)
+    positions_active = np.where(
+        mask[:active_frames, :, None], positions[:active_frames], 0.0
+    )
     distance = np.linalg.norm(positions_active[:, :, :2], axis=2)
     outside = mask[:active_frames] & (distance > core_radius + particle_radius)
     visible_count = np.count_nonzero(outside, axis=1)

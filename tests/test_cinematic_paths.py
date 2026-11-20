@@ -153,7 +153,8 @@ def test_auto_still_ignores_terminated_nan_particles() -> None:
     )
     valid = np.array([[True], [True], [False]])
     frame, visible = select_still_frame(positions, valid, active_frames=3)
-    assert frame == 1
+    # Both frames 1 and 2 are visible; the early-mid tie-break picks frame 2.
+    assert frame == 2
     assert visible == 1
 
 

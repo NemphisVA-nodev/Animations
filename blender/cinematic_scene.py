@@ -461,6 +461,15 @@ def main(argv: list[str] | None = None) -> int:
     requested = args.output or default_blend_output(
         args.dataset, args.fps, kind="cinematic"
     )
+    # Reject an invalid still-frame before writing another Blender artifact.
+    if args.render_still and args.still_frame is not None:
+        scene = bpy.context.scene
+        if not scene.frame_start <= args.still_frame <= scene.frame_end:
+            parser.error(
+                f"--still-frame must be between {scene.frame_start} "
+                f"and {scene.frame_end}"
+            )
+
     blend_path = next_available_blend_path(requested)
     blend_path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
@@ -475,11 +484,6 @@ def main(argv: list[str] | None = None) -> int:
             if args.still_frame is not None
             else int(scene["recommended_still_frame"])
         )
-        if not scene.frame_start <= frame <= scene.frame_end:
-            parser.error(
-                f"--still-frame must be between {scene.frame_start} "
-                f"and {scene.frame_end}"
-            )
         if int(scene["recommended_still_visible_particles"]) == 0:
             print(
                 "WARNING: all sampled particle centres are within the "
