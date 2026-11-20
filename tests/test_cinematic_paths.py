@@ -6,9 +6,11 @@ import pytest
 from blender.cinematic_paths import (
     camera_plan,
     cinematic_camera_fit,
+    decorative_disk_arc,
     estimate_visual_scale,
     select_still_frame,
     trail_reveal_windows,
+    trail_width_profile,
     visible_infall_window_end,
 )
 
@@ -401,3 +403,53 @@ def test_visible_infall_window_refuses_invalid_shapes() -> None:
             np.ones((4, 1), dtype=int),
             scale=1,
         )
+
+
+def test_trail_width_profile_decorative_taper() -> None:
+    widths = trail_width_profile(20)
+    assert widths[0] == pytest.approx(0.42)
+    assert widths[-1] == pytest.approx(1.0)
+    assert np.all(np.diff(widths) >= 0)
+    assert np.all(np.isfinite(widths))
+
+
+@pytest.mark.parametrize("count", [0, 1, -4, 2.5, True])
+def test_trail_width_profile_rejects_invalid_counts(count) -> None:
+    with pytest.raises(ValueError, match="point_count"):
+        trail_width_profile(count)
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum"),
+    [(0, 1), (-1, 2), (1.1, 1), (np.nan, 1)]
+)
+def test_trail_width_profile_rejects_invalid_widths(minimum, maximum) -> None:
+    with pytest.raises(ValueError, match="width range"):
+        trail_width_profile(10, minimum=minimum, maximum=maximum)
+
+
+def test_decorative_arc_is_circular_and_fades_at_ends() -> None:
+    xyz, widths = decorative_disk_arc(
+        1.5, start_angle=0.2, span_angle=0.5, points=25
+    )
+    assert xyz.shape == (25, 3)
+    assert widths.shape == (25,)
+    assert np.allclose(np.linalg.norm(xyz[:, :2], axis=1), 1.5)
+    assert np.allclose(xyz[:, 2], 0.065)
+    assert widths[0] == pytest.approx(widths[-1])
+    assert widths[12] > widths[0]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"radius": -1.0, "start_angle": 0.0, "span_angle": 0.5}, "radius"),
+        ({"radius": 1.0, "start_angle": np.nan, "span_angle": 0.5}, "start_angle"),
+        ({"radius": 1.0, "start_angle": 0.0, "span_angle": 0.0}, "span_angle"),
+        ({"radius": 1.0, "start_angle": 0.0, "span_angle": 2*np.pi}, "span_angle"),
+        ({"radius": 1.0, "start_angle": 0.0, "span_angle": 0.5, "points": 2}, "points"),
+    ],
+)
+def test_decorative_disk_arc_rejects_invalid_parameters(kwargs, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        decorative_disk_arc(**kwargs)
