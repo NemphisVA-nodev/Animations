@@ -228,7 +228,7 @@ def test_manifest_verifies_png_checksum_and_missing_frame(tmp_path: Path) -> Non
     directory = tmp_path / "frames"
     directory.mkdir()
     image = directory / "frame_0001.png"
-    image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"image-data")
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"image-data")
     manifest.record_frame_checksum(1, image)
     assert manifest.verified_frames(directory) == {1}
     image.unlink()
@@ -241,9 +241,9 @@ def test_manifest_refuses_modified_png(tmp_path: Path) -> None:
     directory = tmp_path / "frames"
     directory.mkdir()
     image = directory / "frame_0001.png"
-    image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"image-data")
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"image-data")
     manifest.record_frame_checksum(1, image)
-    image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"other-data")
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"other-data")
     with pytest.raises(ManifestError, match="differs"):
         manifest.verified_frames(directory)
 

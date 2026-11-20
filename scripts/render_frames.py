@@ -9,9 +9,9 @@ scripts/render_frames.py -- ...``). It:
    render manifest (resume support).
 4. Updates the manifest after each successfully rendered frame.
 
-The manifest is a JSON sidecar that records render configuration and completed
-frames. If the configuration changes (different FPS, resolution, or frame
-range), a new manifest is started.
+The manifest records source .blend and PNG checksums, render configuration,
+and completed frames. Changes to render-affecting inputs require a new output
+directory; extending a frame range is supported for unchanged configuration.
 
 Output files are never overwritten: each render uses a dedicated frame output
 directory, and the manifest ensures idempotent re-runs.
@@ -125,9 +125,8 @@ def render_frames(
     stem:
         Filename stem for rendered frames (default ``"frame"``).
     resume:
-        If True (default), an existing compatible manifest is used to skip
-        already-rendered frames. If False, rendering starts from
-        ``frame_start`` regardless of existing manifest state.
+        If True (default), use a compatible manifest and skip verified PNGs.
+        If False, require an empty output directory to avoid overwriting.
 
     Returns
     -------

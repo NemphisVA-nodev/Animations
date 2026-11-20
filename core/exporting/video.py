@@ -268,7 +268,7 @@ def export_to_mp4(
         from core.exporting.manifest import RenderManifest
 
         manifest = RenderManifest.load(manifest_path)
-        if manifest.stem != prefix.rstrip("_"):
+        if prefix != f"{manifest.stem}_":
             raise ValueError("frame filename stem differs from render manifest")
         expected = set(range(manifest.frame_start, manifest.frame_end + 1))
         if not expected.issubset(frame_numbers):

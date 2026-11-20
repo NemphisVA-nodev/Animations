@@ -296,9 +296,6 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
 
 def test_render_frames_restores_deleted_frame(tmp_path: Path) -> None:
     """Resume recreates missing frames instead of incorrectly skipping them."""
@@ -330,3 +327,8 @@ def test_fractional_fps_preserved_inside_blender(tmp_path: Path) -> None:
     import bpy
     effective = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
     assert abs(effective - 23.976) < 1e-5
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
