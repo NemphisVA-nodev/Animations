@@ -230,12 +230,72 @@ def run_visible_motion_pacing_test(
     )
 
 
+
+def run_animated_disk_test(
+    dataset_path: str | Path, *, scale: float, fps: float
+) -> None:
+    """Check decorative ring motion and independence from particle keyframes."""
+    require_bpy()
+    objects = build_cinematic_scene(
+        dataset_path, scale=scale, fps=fps, animated_disk=True,
+        fit_visible_motion=True,
+    )
+    scene = bpy.context.scene
+    assert scene["schematic_disk_highlights_enabled"]
+    inner = bpy.data.objects["Cinematic_Disk_Inner_Highlight"]
+    outer = bpy.data.objects["Cinematic_Disk_Outer_Highlight"]
+    plane = bpy.data.objects["Cinematic_Disk_Highlight_Plane"]
+    assert inner.parent == plane and outer.parent == plane
+    assert inner["visual_classification"].startswith("SCHEMATIC")
+    assert len(inner.data.splines[0].points) == 25
+    assert len(objects) >= 2
+
+    scene.frame_set(1)
+    start_angle = float(inner.rotation_euler.z)
+    scene.frame_set(scene.frame_end // 2)
+    middle_angle = float(inner.rotation_euler.z)
+    scene.frame_set(scene.frame_end)
+    end_angle = float(inner.rotation_euler.z)
+    assert start_angle < middle_angle < end_angle
+    assert abs(end_angle - 2 * np.pi) < 1e-4
+    assert plane.rotation_euler.x > 0.05
+
+    # Particle scene is still driven by exactly the same source data.
+    source = load_dataset(dataset_path)
+    arr = source.arrays
+    ids = [pid for pid in objects if pid != "BlackHole_Marker"]
+    spec = PlaybackSpec(
+        scene_id="disk_test", simulation_id=source.metadata.get("simulation_id"),
+        fps=fps, duration_s=4.0, hold_s=1.0,
+        start_sim_time_s=float(arr["timestamps"][0]),
+        end_sim_time_s=float(scene["motion_fit_end_sim_time_s"]),
+    )
+    mapping = build_frame_mapping(spec)
+    coords, valid = sample_particle_positions(
+        source, ids, mapping.all_sim_times_s
+    )
+    scaled = metres_to_blender(coords, scale)
+    for frame_idx in sorted({0, mapping.num_frames // 2, mapping.num_frames - 1}):
+        scene.frame_set(frame_idx + 1)
+        for j, pid in enumerate(ids):
+            if valid[frame_idx, j]:
+                assert np.allclose(
+                    objects[pid].location[:], scaled[frame_idx, j],
+                    rtol=1e-5, atol=1e-5
+                ), f"decorative disk altered {pid} trajectory frame {frame_idx + 1}"
+    print("Animated schematic disk integration PASSED")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Cinematic Blender smoke test")
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--scale", type=float, default=1e-6)
     parser.add_argument("--fps", type=float, default=24.0)
     parser.add_argument("--trail-frames", type=int, default=14)
+    parser.add_argument(
+        "--animated-disk-test", action="store_true",
+        help="Validate optional decorative ring highlights.",
+    )
     parser.add_argument(
         "--fit-visible-motion-test", action="store_true",
         help="Test physics-preserving retimed visible infall instead of the standard scene.",
@@ -247,6 +307,11 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output or default_blend_output(
         args.dataset, args.fps, kind="cinematic_smoke"
     )
+    if args.animated_disk_test:
+        run_animated_disk_test(
+            args.dataset, scale=args.scale, fps=args.fps
+        )
+        return 0
     if args.fit_visible_motion_test:
         run_visible_motion_pacing_test(
             args.dataset, scale=args.scale, fps=args.fps
