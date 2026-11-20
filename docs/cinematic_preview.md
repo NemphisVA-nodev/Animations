@@ -194,3 +194,31 @@ This is not physically slowed infall, relativistic time dilation, or a
 simulation of a deforming/spaghettifying body. It is a documentary editing
 choice: mapping a shorter interval of existing Newtonian motion across more
 seconds of presentation.
+
+
+## Step 5C.5 — Optional moving schematic disk highlights
+
+The `--animated-disk` option adds two lightweight moving, softly tapered
+highlights over the existing glowing rings. They continue orbiting during the
+one-second end hold, keeping the shot from becoming completely static.
+The default remains OFF for backward compatibility.
+
+**Scientific boundary:** The highlights are cinematic decorations. Their
+angular speeds are art-directed; they are *not* Newtonian orbital solutions,
+gas dynamics, relativistic accretion, or simulated gravitational lensing.
+No data from the source dataset is edited. Existing source-sampled particle
+trails also receive a modest width taper without moving any point.
+
+```powershell
+$blender = "C:\Users\BVBITNB10Test\Desktop\Blender\blender.exe"
+$dataset = "C:\Users\BVBITNB10Test\Desktop\FGoeken\Prasentation_\Animations\Animations\outputs\preview_radial_infall_radial_infall"
+
+& $blender --background --python-exit-code 1 --python blender/tests/test_cinematic_integration.py -- --dataset $dataset --scale 1e-6 --fps 24 --animated-disk-test
+
+& $blender --background --python-exit-code 1 --python blender/cinematic_scene.py -- --dataset $dataset --auto-scale --fit-visible-motion --animated-disk --duration 5 --fps 24 --quality draft
+```
+
+Use a fresh frame-output directory for the resulting `.blend` because the
+video exporter must not reuse cached PNGs from an earlier scene. Both new
+highlight curves are cheap and should be compatible with modest hardware,
+but the effect still needs actual Blender 5.3 and rendering verification.
