@@ -34,6 +34,7 @@ except ImportError:  # Outside Blender: only pure helpers are unit tested.
 from blender.animator import Animator, require_bpy  # noqa: E402
 from blender.cinematic_paths import (  # noqa: E402
     camera_plan,
+    estimate_visual_scale,
     select_still_frame,
     trail_reveal_windows,
 )
@@ -367,6 +368,7 @@ def build_cinematic_scene(
     )
     bpy.context.scene["recommended_still_frame"] = suggested_frame
     bpy.context.scene["recommended_still_visible_particles"] = visible_count
+    bpy.context.scene["visual_scale_m_to_blender"] = float(scale)
 
     collection = _visual_collection()
     _darken_black_hole(particles[animator.bh_marker_name])
@@ -427,7 +429,11 @@ def main(argv: list[str] | None = None) -> int:
     require_bpy()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, help="Trajectory dataset stem.")
-    parser.add_argument("--scale", type=float, default=SCALE_DEFAULT)
+    parser.add_argument("--scale", type=float, default=None)
+    parser.add_argument(
+        "--auto-scale", action="store_true",
+        help="Choose a constant visual scale from initial particle radii.",
+    )
     parser.add_argument("--fps", type=float, default=24.0)
     parser.add_argument("--duration", type=float, default=5.0)
     parser.add_argument("--hold", type=float, default=0.0)
@@ -447,10 +453,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.still_frame is not None and not args.render_still:
         parser.error("--still-frame requires --render-still")
+    if args.auto_scale and args.scale is not None:
+        parser.error("--auto-scale cannot be combined with --scale")
+
+    scale = SCALE_DEFAULT if args.scale is None else args.scale
+    if args.auto_scale:
+        raw = load_trajectory(args.dataset)
+        scale = estimate_visual_scale(raw.positions, raw.validity_mask)
+        print(f"Auto visual scale: {scale:.8g} Blender units/metre")
 
     build_cinematic_scene(
         args.dataset,
-        scale=args.scale,
+        scale=scale,
         fps=args.fps,
         duration_s=args.duration,
         hold_s=args.hold,

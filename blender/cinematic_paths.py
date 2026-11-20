@@ -155,3 +155,49 @@ def select_still_frame(
     candidates = np.flatnonzero(scores == np.max(scores))
     winner = int(min(candidates, key=lambda i: (abs(int(i) - preferred_index), i)))
     return winner + 1, max_visible
+
+
+def estimate_visual_scale(
+    positions_metres: np.ndarray,
+    validity_mask: np.ndarray,
+    *,
+    target_start_radius: float = 4.0,
+) -> float:
+    """Recommend metres-to-Blender scale from valid *initial* particle radii.
+
+    The median nonzero radius is robust to one distant outlier. This only
+    selects a *constant visual coordinate scale*; source SI positions and
+    physical timeline remain unchanged. The target 4-unit radius places
+    typical initial particles outside the schematic outer glow ring.
+
+    Raises ValueError if no usable nonzero initial radius exists.
+    """
+    positions = np.asarray(positions_metres, dtype=np.float64)
+    validity = np.asarray(validity_mask)
+    if positions.ndim != 3 or positions.shape[-1] != 2:
+        raise ValueError("positions_metres must have shape (T, N, 2)")
+    if (
+        validity.shape != positions.shape[:2]
+        or validity.dtype.kind != "b"
+    ):
+        raise ValueError("validity_mask must be boolean with shape (T, N)")
+    if not positions.shape[0] or not positions.shape[1]:
+        raise ValueError("positions_metres must contain frames and particles")
+    if not np.isfinite(target_start_radius) or target_start_radius <= 0:
+        raise ValueError("target_start_radius must be positive and finite")
+
+    initial = positions[0, validity[0]]
+    if initial.size == 0:
+        raise ValueError("no valid particles at the initial simulation frame")
+    if not np.all(np.isfinite(initial)):
+        raise ValueError("valid initial particle positions must be finite")
+
+    radii = np.linalg.norm(initial, axis=1)
+    usable = radii[np.isfinite(radii) & (radii > 0)]
+    if usable.size == 0:
+        raise ValueError("no nonzero finite initial particle radius for auto-scale")
+
+    estimated = float(target_start_radius / np.median(usable))
+    if not np.isfinite(estimated) or estimated <= 0:
+        raise ValueError("auto-scale is not a positive finite value")
+    return estimated

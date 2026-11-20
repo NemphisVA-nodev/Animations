@@ -118,3 +118,26 @@ If all particles are hidden inside the decorative core at the chosen
 `--scale`, the script prints a warning and suggests increasing the *visual*
 scale (for instance, from `5e-8` to `1e-6`). A visual scale change does not
 change the trajectory dataset.
+
+
+### Automatic visual scale
+
+Add `--auto-scale` to pick a constant metres-to-Blender conversion from the
+median initial distance of **valid, nonzero** particle positions. By default,
+the typical starting distance is placed at approximately 4 Blender units,
+outside the schematic rings. This is helpful when different datasets use
+very different astronomical distances:
+
+```powershell
+& $blender --background --python-exit-code 1 --python blender/cinematic_scene.py -- --dataset $dataset --auto-scale --fps 24 --quality draft --render-still
+```
+
+`--auto-scale` and `--scale` are mutually exclusive. For scientific
+comparison, the selected constant scale is saved on the Blender scene as
+`visual_scale_m_to_blender`; source positions and timestamps remain untouched.
+If the dataset has no valid, nonzero starting radius, automatic scaling fails
+with a clear error and you can still choose an explicit `--scale`.
+
+**Limitation:** this is a framing aid, not a guarantee that particles are
+visible at every later frame. Infall can still take them inside the core or
+behind schematic rings. Use `--still-frame` for explicit inspection.

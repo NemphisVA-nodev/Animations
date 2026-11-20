@@ -5,6 +5,7 @@ import pytest
 
 from blender.cinematic_paths import (
     camera_plan,
+    estimate_visual_scale,
     select_still_frame,
     trail_reveal_windows,
 )
@@ -179,4 +180,61 @@ def test_auto_still_rejects_invalid_radius() -> None:
             np.ones((2, 1), dtype=bool),
             active_frames=2,
             core_radius=-1,
+        )
+
+
+def test_auto_scale_fits_typical_initial_particle_radius() -> None:
+    positions = np.array(
+        [[[4e6, 0.0], [0.0, 4e6], [0.0, 1e9]]], dtype=float
+    )
+    mask = np.ones((1, 3), dtype=bool)
+    original = positions.copy()
+    scale = estimate_visual_scale(positions, mask)
+    assert scale == pytest.approx(1e-6)
+    assert np.array_equal(positions, original), "visual scale changed source data"
+
+
+def test_auto_scale_ignores_invalid_nan_particle() -> None:
+    positions = np.array([[[4e6, 0.0], [np.nan, np.nan]]])
+    mask = np.array([[True, False]])
+    assert estimate_visual_scale(positions, mask) == pytest.approx(1e-6)
+
+
+def test_auto_scale_does_not_use_later_infall_radius() -> None:
+    positions = np.array(
+        [[[4e6, 0.0]], [[2e6, 0.0]], [[1e6, 0.0]]], dtype=float
+    )
+    mask = np.ones((3, 1), dtype=bool)
+    assert estimate_visual_scale(positions, mask) == pytest.approx(1e-6)
+
+
+@pytest.mark.parametrize(
+    ("positions", "mask", "message"),
+    [
+        (np.zeros((2, 2)), np.ones((2, 1), dtype=bool), "shape"),
+        (np.zeros((2, 1, 2)), np.ones((1, 1), dtype=bool), "shape"),
+        (np.zeros((0, 1, 2)), np.zeros((0, 1), dtype=bool), "frames"),
+        (np.zeros((1, 1, 2)), np.zeros((1, 1), dtype=bool), "no valid"),
+        (np.zeros((1, 1, 2)), np.ones((1, 1), dtype=bool), "nonzero"),
+        (
+            np.array([[[np.nan, 0.0]]]),
+            np.ones((1, 1), dtype=bool),
+            "finite",
+        ),
+    ],
+)
+def test_auto_scale_rejects_unusable_initial_conditions(
+    positions, mask, message
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        estimate_visual_scale(positions, mask)
+
+
+@pytest.mark.parametrize("target_radius", [0.0, -3.0, np.nan, np.inf])
+def test_auto_scale_rejects_invalid_target_radius(target_radius) -> None:
+    with pytest.raises(ValueError, match="target_start_radius"):
+        estimate_visual_scale(
+            np.array([[[4e6, 0.0]]]),
+            np.ones((1, 1), dtype=bool),
+            target_start_radius=target_radius,
         )

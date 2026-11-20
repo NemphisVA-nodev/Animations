@@ -23,7 +23,7 @@ except ImportError:
     bpy = None
 
 from blender.animator import require_bpy
-from blender.cinematic_paths import trail_reveal_windows
+from blender.cinematic_paths import select_still_frame, trail_reveal_windows
 from blender.cinematic_scene import build_cinematic_scene, VISUAL_COLLECTION
 from blender.importer import metres_to_blender
 from blender.output_paths import default_blend_output, next_available_blend_path
@@ -107,6 +107,13 @@ def run_cinematic_test(
     )
     expected = metres_to_blender(positions, scale)
     assert scene.frame_end == mapping.total_frames
+    recommended, visible = select_still_frame(
+        expected, valid, active_frames=mapping.num_frames
+    )
+    assert scene["recommended_still_frame"] == recommended
+    assert scene["recommended_still_visible_particles"] == visible
+    assert scene["visual_scale_m_to_blender"] == scale
+    assert 1 <= recommended <= mapping.num_frames
 
     frames = sorted({0, mapping.total_frames // 2, mapping.total_frames - 1})
     for index, pid in enumerate(ids):
