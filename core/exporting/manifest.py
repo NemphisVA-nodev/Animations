@@ -191,11 +191,9 @@ class RenderManifest:
     ) -> bool:
         """Return True if this manifest's config matches the given request.
 
-        The output directory, completed frames, and frame range are not part
-        of the config comparison; only the render parameters that affect
-        pixel output are compared. This allows resuming a render with a
-        different frame range (e.g. extending the range or rendering a subset
-        of remaining frames).
+        The frame range is excluded to allow extension or partial resumes.
+        For safety, callers may additionally require an identical source
+        .blend SHA-256, output directory, and filename stem.
         """
         return (
             str(Path(blend_path).resolve()) == str(Path(self.blend_path).resolve())

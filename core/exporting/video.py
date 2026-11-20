@@ -262,6 +262,9 @@ def export_to_mp4(
         )
         if filename.stat().st_size <= 8:
             raise ValueError(f"frame is empty or truncated: {filename}")
+        with filename.open("rb") as handle:
+            if handle.read(8) != b"\x89PNG\r\n\x1a\n":
+                raise ValueError(f"frame is not a PNG file: {filename}")
 
     manifest_path = frame_dir / "render_manifest.json"
     if manifest_path.exists():

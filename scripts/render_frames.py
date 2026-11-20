@@ -73,12 +73,21 @@ def _render_frame(
     """
     scene.frame_set(frame_number)
     output_path = output_dir / f"{stem}_{frame_number:04d}.png"
-    scene.render.filepath = str(output_path)
+    if output_path.exists():
+        raise ManifestError(f"frame already exists; refusing overwrite: {output_path}")
+
+    # Write to a temporary name first. A crash in Blender's render operator
+    # must never publish a half-written frame under its final filename.
+    pending_path = output_dir / f".{stem}_{frame_number:04d}.pending.png"
+    if pending_path.exists():
+        pending_path.unlink()  # stale unpublished partial from interrupted render
+    scene.render.filepath = str(pending_path)
     bpy.ops.render.render(write_still=True)
-    if not output_path.is_file():
+    if not pending_path.is_file() or pending_path.stat().st_size <= 8:
         raise RuntimeError(
-            f"Blender render did not produce expected output: {output_path}"
+            f"Blender render did not produce a complete PNG: {pending_path}"
         )
+    pending_path.replace(output_path)
     return output_path
 
 

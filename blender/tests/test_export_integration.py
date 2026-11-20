@@ -291,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
     test_render_frames_no_resume_renders_all(tmp_dir)
     test_render_frames_restores_deleted_frame(tmp_dir)
     test_fractional_fps_preserved_inside_blender(tmp_dir)
+    test_render_frames_changed_blend_rejects_resume(tmp_dir)
+    test_render_frames_corrupt_png_refuses_resume(tmp_dir)
 
     print("All Blender frame-render integration tests PASSED")
     return 0
@@ -327,6 +329,52 @@ def test_fractional_fps_preserved_inside_blender(tmp_path: Path) -> None:
     import bpy
     effective = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
     assert abs(effective - 23.976) < 1e-5
+
+
+
+
+def test_render_frames_changed_blend_rejects_resume(tmp_path: Path) -> None:
+    """Same path with changed scene bytes must never reuse old frames."""
+    blend = tmp_path / "test_scene_modified.blend"
+    folder = tmp_path / "modified_frames"
+    _make_minimal_scene(blend)
+    render_frames(
+        blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+        resolution_x=320, resolution_y=180,
+    )
+    with blend.open("ab") as handle:
+        handle.write(b"changed scene source")
+    try:
+        render_frames(
+            blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+            resolution_x=320, resolution_y=180,
+        )
+    except Exception as exc:
+        assert "incompatible" in str(exc).lower()
+    else:
+        raise AssertionError("Expected incompatible source .blend hash")
+
+
+def test_render_frames_corrupt_png_refuses_resume(tmp_path: Path) -> None:
+    """A corrupt existing image is never silently overwritten or skipped."""
+    blend = tmp_path / "test_scene_corrupt.blend"
+    folder = tmp_path / "corrupt_frames"
+    _make_minimal_scene(blend)
+    render_frames(
+        blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+        resolution_x=320, resolution_y=180,
+    )
+    image = folder / "frame_0001.png"
+    image.write_bytes(b"corrupted-image-bytes")
+    try:
+        render_frames(
+            blend_path=blend, frame_dir=folder, frame_start=1, frame_end=1,
+            resolution_x=320, resolution_y=180,
+        )
+    except Exception as exc:
+        assert "differs" in str(exc).lower()
+    else:
+        raise AssertionError("Expected PNG checksum mismatch")
 
 
 if __name__ == "__main__":
