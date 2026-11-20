@@ -124,7 +124,11 @@ def run_cinematic_test(
     assert scene["recommended_still_visible_particles"] == visible
     assert scene["visual_scale_m_to_blender"] == scale
     assert 1 <= recommended <= mapping.num_frames
-    assert objects[ids[0]].scale.x == 0.23
+    # Blender stores Object.scale as float32; exact float64 equality is brittle.
+    assert np.allclose(
+        tuple(objects[ids[0]].scale), (0.23, 0.23, 0.23),
+        rtol=0.0, atol=1e-6,
+    ), f"unexpected particle marker scale: {tuple(objects[ids[0]].scale)}"
 
     frames = sorted({0, mapping.total_frames // 2, mapping.total_frames - 1})
     for index, pid in enumerate(ids):
