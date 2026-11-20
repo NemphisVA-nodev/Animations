@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from blender.output_paths import default_blend_output, next_available_blend_path
+from blender.output_paths import (
+    default_blend_output, next_available_blend_path, next_available_png_path,
+)
 
 
 def test_default_names_preserve_dataset_and_frame_rate() -> None:
@@ -55,3 +57,17 @@ def test_existing_scene_never_overwritten(tmp_path: Path) -> None:
 def test_rejects_non_blend_extensions(tmp_path: Path, filename: str) -> None:
     with pytest.raises(ValueError, match=r"end in \.blend"):
         next_available_blend_path(tmp_path / filename)
+
+
+def test_render_still_paths_preserve_existing_png(tmp_path: Path) -> None:
+    original = tmp_path / "cinematic_still.png"
+    original.write_bytes(b"first render")
+    next_path = next_available_png_path(original)
+    assert next_path.name == "cinematic_still_001.png"
+    next_path.write_bytes(b"second render")
+    assert original.read_bytes() == b"first render"
+
+
+def test_rejects_invalid_still_extension(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="end in .png"):
+        next_available_png_path(tmp_path / "cinematic.blend")
