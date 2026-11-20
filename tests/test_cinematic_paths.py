@@ -9,6 +9,7 @@ from blender.cinematic_paths import (
     estimate_visual_scale,
     select_still_frame,
     trail_reveal_windows,
+    visible_infall_window_end,
 )
 
 
@@ -281,3 +282,122 @@ def test_cinematic_camera_fit_rejects_no_valid_points() -> None:
     pos = np.zeros((1, 1, 3), dtype=float)
     with pytest.raises(ValueError, match="no valid"):
         cinematic_camera_fit(pos, np.zeros((1, 1), bool))
+
+
+def test_visible_infall_window_uses_last_visible_source_sample() -> None:
+    times = np.arange(7, dtype=float)
+    positions = np.array(
+        [[[6., 0.]], [[5., 0.]], [[4., 0.]], [[2., 0.]],
+         [[0.4, 0.]], [[np.nan, np.nan]], [[np.nan, np.nan]]]
+    )
+    mask = np.array([[True], [True], [True], [True], [True], [False], [False]])
+    before = positions.copy()
+    end = visible_infall_window_end(times, positions, mask, scale=1)
+    assert end == pytest.approx(4 / 0.95)
+    assert np.array_equal(positions, before, equal_nan=True)
+
+
+def test_visible_infall_window_handles_terminated_particles() -> None:
+    times = np.arange(5, dtype=float)
+    positions = np.array(
+        [[[3., 0.], [6., 0.]], [[2., 0.], [4., 0.]],
+         [[1., 0.], [2., 0.]], [[np.nan, np.nan], [0.3, 0.]],
+         [[np.nan, np.nan], [np.nan, np.nan]]]
+    )
+    mask = np.array(
+        [[True, True], [True, True], [True, True],
+         [False, True], [False, False]]
+    )
+    # Last centre outside the schematic 0.735-unit outline occurs at t=2.
+    assert visible_infall_window_end(
+        times, positions, mask, scale=1
+    ) == pytest.approx(3 / 0.95)
+
+
+def test_visible_infall_window_does_not_crop_continuing_motion() -> None:
+    times = np.arange(4, dtype=float)
+    pos = np.array([[[5., 0.]], [[4., 0.]], [[3., 0.]], [[2., 0.]]])
+    assert visible_infall_window_end(
+        times, pos, np.ones((4, 1), dtype=bool), scale=1
+    ) is None
+
+
+def test_visible_infall_window_rejects_invisible_source() -> None:
+    times = np.arange(4, dtype=float)
+    pos = np.zeros((4, 1, 2))
+    with pytest.raises(ValueError, match="fewer than two"):
+        visible_infall_window_end(
+            times, pos, np.ones((4, 1), dtype=bool), scale=1
+        )
+
+
+@pytest.mark.parametrize("bad_scale", [0, -2, np.nan, np.inf])
+def test_visible_infall_window_rejects_bad_scale(bad_scale) -> None:
+    times = np.arange(3, dtype=float)
+    pos = np.ones((3, 1, 2))
+    with pytest.raises(ValueError, match="scale"):
+        visible_infall_window_end(
+            times, pos, np.ones((3, 1), dtype=bool), scale=bad_scale
+        )
+
+
+def test_visible_infall_window_rejects_reversed_time() -> None:
+    times = np.array([0., 2., 1.])
+    pos = np.ones((3, 1, 2))
+    with pytest.raises(ValueError, match="increasing"):
+        visible_infall_window_end(
+            times, pos, np.ones((3, 1), dtype=bool), scale=1
+        )
+
+
+def test_visible_infall_window_rejects_invalid_valid_positions() -> None:
+    times = np.arange(3, dtype=float)
+    pos = np.array([[[3., 0.]], [[np.nan, 0.]], [[1., 0.]]])
+    with pytest.raises(ValueError, match="finite"):
+        visible_infall_window_end(
+            times, pos, np.ones((3, 1), dtype=bool), scale=1
+        )
+
+
+def test_visible_infall_pacing_keeps_120_frames_without_fabricating_positions() -> None:
+    from core.playback import PlaybackSpec, build_frame_mapping
+
+    times = np.arange(7, dtype=float)
+    pos = np.array(
+        [[[6., 0.]], [[5., 0.]], [[4., 0.]], [[2., 0.]],
+         [[0.4, 0.]], [[np.nan, np.nan]], [[np.nan, np.nan]]]
+    )
+    mask = np.array([[True], [True], [True], [True], [True], [False], [False]])
+    end = visible_infall_window_end(times, pos, mask, scale=1)
+    spec = PlaybackSpec(
+        scene_id="pacing_contract", simulation_id=None, fps=24.0,
+        duration_s=4.0, hold_s=1.0,
+        start_sim_time_s=0.0, end_sim_time_s=end,
+    )
+    mapping = build_frame_mapping(spec)
+    assert mapping.num_frames == 96
+    assert mapping.hold_frames == 24
+    assert mapping.total_frames == 120
+    assert mapping.sim_times_s[0] == pytest.approx(0.0)
+    assert np.all(np.diff(mapping.sim_times_s) > 0)
+    assert mapping.sim_times_s[-1] < end
+    assert mapping.all_sim_times_s[-1] == mapping.endpoint_sim_time_s
+    assert np.array_equal(mapping.all_sim_times_s[-24:],
+                          np.full(24, mapping.endpoint_sim_time_s))
+
+
+def test_visible_infall_window_refuses_invalid_shapes() -> None:
+    with pytest.raises(ValueError, match="shape"):
+        visible_infall_window_end(
+            np.arange(4, dtype=float),
+            np.zeros((4, 2)),
+            np.ones((4, 1), dtype=bool),
+            scale=1,
+        )
+    with pytest.raises(ValueError, match="boolean"):
+        visible_infall_window_end(
+            np.arange(4, dtype=float),
+            np.zeros((4, 1, 2)),
+            np.ones((4, 1), dtype=int),
+            scale=1,
+        )

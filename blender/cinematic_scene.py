@@ -36,6 +36,7 @@ from blender.cinematic_paths import (  # noqa: E402
     cinematic_camera_fit,
     estimate_visual_scale,
     select_still_frame,
+    visible_infall_window_end,
     trail_reveal_windows,
 )
 from blender.importer import (  # noqa: E402
@@ -315,6 +316,8 @@ def build_cinematic_scene(
     hold_s: float = 0.0,
     trail_frames: int = 14,
     quality: str = "draft",
+    fit_visible_motion: bool = False,
+    motion_fraction: float = 0.8,
 ) -> dict[str, object]:
     """Build a self-contained scene from Step 5B's validated particle positions.
 
@@ -333,14 +336,40 @@ def build_cinematic_scene(
     _remove_default_startup_objects()
 
     data = load_trajectory(dataset_path, scale=scale)
+    if fit_visible_motion:
+        if hold_s != 0:
+            raise ValueError("--fit-visible-motion cannot be combined with --hold")
+        if not np.isfinite(motion_fraction) or not 0 < motion_fraction < 1:
+            raise ValueError("motion_fraction must be between zero and one")
+        fitted_end = visible_infall_window_end(
+            data.timestamps, data.positions, data.validity_mask, scale=scale
+        )
+        if fitted_end is not None:
+            # Five-second default: approximately 4 s movement + 1 s ending.
+            active_duration_s = duration_s * motion_fraction
+            ending_hold_s = duration_s - active_duration_s
+        else:
+            # No observed cutoff in dataset: don't freeze a moving particle
+            # merely to fill an artificial ending hold.
+            print("WARNING: particles are still visible at the final source "
+                  "sample; keeping full simulation playback without a hold.")
+            active_duration_s = duration_s
+            ending_hold_s = 0.0
+    else:
+        fitted_end = None
+        active_duration_s = duration_s
+        ending_hold_s = hold_s
+
     spec = PlaybackSpec(
         scene_id="cinematic_black_hole",
         simulation_id=data.metadata.get("simulation_id"),
         fps=fps,
-        duration_s=duration_s,
+        duration_s=active_duration_s,
         start_sim_time_s=float(data.timestamps[0]),
-        end_sim_time_s=float(data.timestamps[-1]),
-        hold_s=hold_s,
+        end_sim_time_s=(
+            float(data.timestamps[-1]) if fitted_end is None else fitted_end
+        ),
+        hold_s=ending_hold_s,
     )
     # The animator provides all source-of-truth particle keyframes.
     animator = Animator(data=data, spec=spec, scale=scale)
@@ -363,6 +392,18 @@ def build_cinematic_scene(
     bpy.context.scene["recommended_still_frame"] = suggested_frame
     bpy.context.scene["recommended_still_visible_particles"] = visible_count
     bpy.context.scene["visual_scale_m_to_blender"] = float(scale)
+    bpy.context.scene["motion_fit_enabled"] = bool(
+        fit_visible_motion and fitted_end is not None
+    )
+    bpy.context.scene["motion_fit_end_sim_time_s"] = float(spec.end_sim_time_s)
+    bpy.context.scene["motion_fit_active_seconds"] = float(spec.duration_s)
+    bpy.context.scene["motion_fit_hold_seconds"] = float(spec.hold_s)
+    if fit_visible_motion:
+        print(
+            "Motion pacing: physical window "
+            f"{spec.start_sim_time_s:.8g}–{spec.end_sim_time_s:.8g} s, "
+            f"{spec.duration_s:.3f} s active + {spec.hold_s:.3f} s ending"
+        )
 
     collection = _visual_collection()
     _darken_black_hole(particles[animator.bh_marker_name])
@@ -431,6 +472,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fps", type=float, default=24.0)
     parser.add_argument("--duration", type=float, default=5.0)
     parser.add_argument("--hold", type=float, default=0.0)
+    parser.add_argument(
+        "--fit-visible-motion", action="store_true",
+        help="Fit visible infall into most of the presentation; preserve physics.",
+    )
+    parser.add_argument(
+        "--motion-fraction", type=float, default=0.8,
+        help="Part of --duration used for visible infall (default 0.8).",
+    )
     parser.add_argument("--trail-frames", type=int, default=14)
     parser.add_argument("--quality", choices=("draft", "final"), default="draft")
     parser.add_argument("--output", default=None, help="Optional .blend output path.")
@@ -449,6 +498,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--still-frame requires --render-still")
     if args.auto_scale and args.scale is not None:
         parser.error("--auto-scale cannot be combined with --scale")
+    if args.fit_visible_motion and args.hold != 0:
+        parser.error("--fit-visible-motion cannot be combined with --hold")
+    if not (0 < args.motion_fraction < 1):
+        parser.error("--motion-fraction must be between zero and one")
 
     scale = SCALE_DEFAULT if args.scale is None else args.scale
     if args.auto_scale:
@@ -464,6 +517,8 @@ def main(argv: list[str] | None = None) -> int:
         hold_s=args.hold,
         trail_frames=args.trail_frames,
         quality=args.quality,
+        fit_visible_motion=args.fit_visible_motion,
+        motion_fraction=args.motion_fraction,
     )
 
     requested = args.output or default_blend_output(
