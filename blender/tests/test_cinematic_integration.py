@@ -23,7 +23,7 @@ except ImportError:
     bpy = None
 
 from blender.animator import require_bpy
-from blender.cinematic_paths import trail_reveal_windows
+from blender.cinematic_paths import select_still_frame, trail_reveal_windows
 from blender.cinematic_scene import build_cinematic_scene, VISUAL_COLLECTION
 from blender.importer import metres_to_blender
 from blender.output_paths import default_blend_output, next_available_blend_path
@@ -86,11 +86,21 @@ def run_cinematic_test(
     # Regression: camera framing should not be excessively far left.
     cam = scene.camera
     assert cam is not None
-    # Camera X should not be further left than the subject center minus
-    # a reasonable offset; this catches a camera that drifts off-screen.
-    assert cam.location.x > -50.0, (
-        f"camera too far left: x={cam.location.x}"
-    )
+    assert cam.data.sensor_fit == "HORIZONTAL"
+
+    # Project actual ring mesh vertices to camera space. A visual crop
+    # regression can pass every pure math test but still ruin the screenshot.
+    from bpy_extras.object_utils import world_to_camera_view
+    for ring_name in ring_names:
+        ring = bpy.data.objects[ring_name]
+        for vertex in ring.data.vertices:
+            coord = world_to_camera_view(
+                scene, cam, ring.matrix_world @ vertex.co
+            )
+            assert 0.0 < coord.x < 1.0 and 0.0 < coord.y < 1.0, (
+                f"{ring_name} is outside the rendered camera frame: "
+                f"({coord.x:.4f}, {coord.y:.4f})"
+            )
 
     ids = [pid for pid in objects if pid != "BlackHole_Marker"]
     spec = PlaybackSpec(
@@ -107,6 +117,18 @@ def run_cinematic_test(
     )
     expected = metres_to_blender(positions, scale)
     assert scene.frame_end == mapping.total_frames
+    recommended, visible = select_still_frame(
+        expected, valid, active_frames=mapping.num_frames
+    )
+    assert scene["recommended_still_frame"] == recommended
+    assert scene["recommended_still_visible_particles"] == visible
+    assert scene["visual_scale_m_to_blender"] == scale
+    assert 1 <= recommended <= mapping.num_frames
+    # Blender stores Object.scale as float32; exact float64 equality is brittle.
+    assert np.allclose(
+        tuple(objects[ids[0]].scale), (0.23, 0.23, 0.23),
+        rtol=0.0, atol=1e-6,
+    ), f"unexpected particle marker scale: {tuple(objects[ids[0]].scale)}"
 
     frames = sorted({0, mapping.total_frames // 2, mapping.total_frames - 1})
     for index, pid in enumerate(ids):

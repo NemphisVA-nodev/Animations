@@ -32,7 +32,12 @@ except ImportError:  # Outside Blender: only pure helpers are unit tested.
     Vector = None
 
 from blender.animator import Animator, require_bpy  # noqa: E402
-from blender.cinematic_paths import camera_plan, trail_reveal_windows  # noqa: E402
+from blender.cinematic_paths import (  # noqa: E402
+    cinematic_camera_fit,
+    estimate_visual_scale,
+    select_still_frame,
+    trail_reveal_windows,
+)
 from blender.importer import (  # noqa: E402
     SCALE_DEFAULT,
     load_trajectory,
@@ -204,7 +209,7 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     curve = bpy.data.curves.new(pid + "_TrailGeometry", type="CURVE")
     curve.dimensions = "3D"
     curve.resolution_u = 1
-    curve.bevel_depth = 0.018
+    curve.bevel_depth = 0.024
     curve.bevel_resolution = 2
     # POLY curve: RESOLUTION maps each equally spaced sample to one segment.
     curve.bevel_factor_mapping_start = "RESOLUTION"
@@ -219,7 +224,7 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     obj = bpy.data.objects.new(pid + "_Trail", curve)
     collection.objects.link(obj)
     curve.materials.append(_emission_material(
-        pid + "_TrailMat", color, 1.6
+        pid + "_TrailMat", color, 2.8
     ))
     obj["visual_classification"] = "CALCULATED positions; SCHEMATIC trailing highlight"
 
@@ -228,7 +233,6 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
         curve.bevel_factor_start = float(start[idx])
         curve.bevel_factor_end = float(end[idx])
         curve.keyframe_insert(data_path="bevel_factor_start", frame=frame)
-        curve.bevel_factor_end = float(end[idx])
         curve.keyframe_insert(data_path="bevel_factor_end", frame=frame)
         obj.hide_viewport = not bool(visible[idx])
         obj.hide_render = not bool(visible[idx])
@@ -253,31 +257,26 @@ def _make_trail(pid, sampled_xyz, validity, active_frames, tail_frames, color, c
     return obj
 
 
-def _configure_camera(center_x, center_y, half_extent, collection):
-    """Place the camera for a balanced 16:9 cinematic composition.
+def _configure_camera(target_x, target_y, ortho_width, collection):
+    """Frame the full schematic ring and simulated trajectories.
 
-    The black hole sits near the left third of the frame so the particle
-    trails have room to extend into the right side without excessive empty
-    space. The camera looks down from upper-right toward the origin.
+    A near-top-down orientation preserves the simulation's XY-plane layout
+    while providing a slight perspective on the decorative tilted rings.
+    `ortho_width` is already calculated for the actual 16:9 image aspect.
     """
     bpy.ops.object.camera_add()
     camera = bpy.context.active_object
     camera.name = "Cinematic_Camera"
     _move_into_collection(camera, collection)
     camera.data.type = "ORTHO"
-    # Ortho scale fits both the black hole and the particle trail region.
-    camera.data.ortho_scale = max(8.0, half_extent * 2.6)
-
-    # Rule of thirds: offset the subject (origin / black hole) toward the
-    # left side so the right side carries the trailing particle motion.
-    offset_x = center_x - half_extent * 0.28
-    offset_y = center_y - half_extent * 0.42
+    camera.data.sensor_fit = "HORIZONTAL"
+    camera.data.ortho_scale = ortho_width
     camera.location = (
-        offset_x + half_extent * 0.62,
-        offset_y - half_extent * 0.62,
-        half_extent * 2.1,
+        target_x,
+        target_y - ortho_width * 0.24,
+        ortho_width * 1.6,
     )
-    target = Vector((center_x, center_y, 0.0))
+    target = Vector((target_x, target_y, 0.0))
     camera.rotation_euler = (target - camera.location).to_track_quat(
         "-Z", "Y"
     ).to_euler()
@@ -354,6 +353,17 @@ def build_cinematic_scene(
     )
     scaled_xyz = metres_to_blender(sampled, scale)
 
+    # Recommend a still frame where the calculated particles are outside the
+    # schematic core (rather than blindly choosing frame 45%).
+    suggested_frame, visible_count = select_still_frame(
+        scaled_xyz,
+        mask,
+        active_frames=mapping.num_frames,
+    )
+    bpy.context.scene["recommended_still_frame"] = suggested_frame
+    bpy.context.scene["recommended_still_visible_particles"] = visible_count
+    bpy.context.scene["visual_scale_m_to_blender"] = float(scale)
+
     collection = _visual_collection()
     _darken_black_hole(particles[animator.bh_marker_name])
     particles[animator.bh_marker_name].scale = (0.62, 0.62, 0.62)
@@ -381,8 +391,8 @@ def build_cinematic_scene(
         material.node_tree.links.new(
             emission.outputs["Emission"], output.inputs["Surface"]
         )
-        # Slightly larger particles for readability at draft resolution.
-        particles[pid].scale = (0.85, 0.85, 0.85)
+        # Small schematic markers: radius 0.115 Blender units versus core 0.62.
+        particles[pid].scale = (0.23, 0.23, 0.23)
         _make_trail(
             pid,
             scaled_xyz[:, index],
@@ -393,8 +403,8 @@ def build_cinematic_scene(
             collection,
         )
 
-    center_x, center_y, extent = camera_plan(scaled_xyz, mask)
-    _configure_camera(center_x, center_y, extent, collection)
+    target_x, target_y, ortho_width = cinematic_camera_fit(scaled_xyz, mask)
+    _configure_camera(target_x, target_y, ortho_width, collection)
     bpy.ops.object.light_add(type="AREA", location=(0.0, -3.0, 7.0))
     light = bpy.context.active_object
     light.name = "Cinematic_FillLight"
@@ -413,7 +423,11 @@ def main(argv: list[str] | None = None) -> int:
     require_bpy()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, help="Trajectory dataset stem.")
-    parser.add_argument("--scale", type=float, default=SCALE_DEFAULT)
+    parser.add_argument("--scale", type=float, default=None)
+    parser.add_argument(
+        "--auto-scale", action="store_true",
+        help="Choose a constant visual scale from initial particle radii.",
+    )
     parser.add_argument("--fps", type=float, default=24.0)
     parser.add_argument("--duration", type=float, default=5.0)
     parser.add_argument("--hold", type=float, default=0.0)
@@ -422,15 +436,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", default=None, help="Optional .blend output path.")
     parser.add_argument(
         "--render-still", action="store_true",
-        help="Also render one PNG at roughly the middle of the active animation.",
+        help="Also render one PNG, automatically choosing a frame with visible particles.",
+    )
+    parser.add_argument(
+        "--still-frame", type=int, default=None,
+        help="Render a specific Blender frame (1-based); requires --render-still.",
     )
     if argv is None:
         argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     args = parser.parse_args(argv)
+    if args.still_frame is not None and not args.render_still:
+        parser.error("--still-frame requires --render-still")
+    if args.auto_scale and args.scale is not None:
+        parser.error("--auto-scale cannot be combined with --scale")
+
+    scale = SCALE_DEFAULT if args.scale is None else args.scale
+    if args.auto_scale:
+        raw = load_trajectory(args.dataset)
+        scale = estimate_visual_scale(raw.positions, raw.validity_mask)
+        print(f"Auto visual scale: {scale:.8g} Blender units/metre")
 
     build_cinematic_scene(
         args.dataset,
-        scale=args.scale,
+        scale=scale,
         fps=args.fps,
         duration_s=args.duration,
         hold_s=args.hold,
@@ -441,6 +469,15 @@ def main(argv: list[str] | None = None) -> int:
     requested = args.output or default_blend_output(
         args.dataset, args.fps, kind="cinematic"
     )
+    # Reject an invalid still-frame before writing another Blender artifact.
+    if args.render_still and args.still_frame is not None:
+        scene = bpy.context.scene
+        if not scene.frame_start <= args.still_frame <= scene.frame_end:
+            parser.error(
+                f"--still-frame must be between {scene.frame_start} "
+                f"and {scene.frame_end}"
+            )
+
     blend_path = next_available_blend_path(requested)
     blend_path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
@@ -450,9 +487,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.render_still:
         scene = bpy.context.scene
-        frame = min(scene.frame_end, 1 + round(
-            (scene.frame_end - 1) * 0.45
-        ))
+        frame = (
+            args.still_frame
+            if args.still_frame is not None
+            else int(scene["recommended_still_frame"])
+        )
+        if int(scene["recommended_still_visible_particles"]) == 0:
+            print(
+                "WARNING: all sampled particle centres are within the "
+                "schematic black-hole core at the current --scale; "
+                "try a larger --scale, such as 1e-6."
+            )
+        print(f"Rendering still at Blender frame {frame}")
         scene.frame_set(frame)
         png_path = next_available_png_path(
             blend_path.with_name(blend_path.stem + "_still.png")

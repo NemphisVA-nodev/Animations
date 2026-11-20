@@ -104,3 +104,59 @@ and collision-safe file naming. `blender/tests/test_cinematic_integration.py`
 is a Blender-only smoke test and must run in the actual Blender installation
 before merging. A passed Python suite alone is not evidence of rendered
 visual correctness.
+
+
+## Still-frame selection (trajectory visibility polish)
+
+`--render-still` now selects a frame with the largest number of **valid
+calculated particle centres outside the schematic black-hole core**. This is
+only a preview frame selection: no physical positions or times are changed.
+
+For a specific frame, pass `--still-frame 12 --render-still` (Blender frame
+numbers start at 1). It is useful for comparing early infall to late infall.
+If all particles are hidden inside the decorative core at the chosen
+`--scale`, the script prints a warning and suggests increasing the *visual*
+scale (for instance, from `5e-8` to `1e-6`). A visual scale change does not
+change the trajectory dataset.
+
+
+### Automatic visual scale
+
+Add `--auto-scale` to pick a constant metres-to-Blender conversion from the
+median initial distance of **valid, nonzero** particle positions. By default,
+the typical starting distance is placed at approximately 4 Blender units,
+outside the schematic rings. This is helpful when different datasets use
+very different astronomical distances:
+
+```powershell
+& $blender --background --python-exit-code 1 --python blender/cinematic_scene.py -- --dataset $dataset --auto-scale --fps 24 --quality draft --render-still
+```
+
+`--auto-scale` and `--scale` are mutually exclusive. For scientific
+comparison, the selected constant scale is saved on the Blender scene as
+`visual_scale_m_to_blender`; source positions and timestamps remain untouched.
+If the dataset has no valid, nonzero starting radius, automatic scaling fails
+with a clear error and you can still choose an explicit `--scale`.
+
+**Limitation:** this is a framing aid, not a guarantee that particles are
+visible at every later frame. Infall can still take them inside the core or
+behind schematic rings. Use `--still-frame` for explicit inspection.
+
+
+## Screen framing and smaller particle markers
+
+The camera now fits the **entire** outer schematic ring and all valid sampled
+particle paths, with aspect-aware margins for the 16:9 output. Previously it
+framed only particle positions, clipping the rings when all test particles
+started on one side of the origin.
+
+Particle UV spheres are reduced to scale `0.23` (mesh radius 0.5; displayed
+radius 0.115 Blender units) instead of `0.85`. This is *purely visual* and
+does not change particle masses, distances, velocities, validity or timing.
+The trail material is slightly brighter and thicker for draft readability.
+The Blender integration test projects decorative-ring mesh vertices through
+the actual camera to guard against cropping.
+
+The animation remains a **schematic Newtonian test-particle visualization**.
+This code does not model actual accretion-disk motion, gravitational lensing,
+relativistic black-hole imaging, or gravitational radiation.
