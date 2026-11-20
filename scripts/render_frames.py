@@ -222,6 +222,10 @@ def render_frames(
             stem=stem,
         )
 
+    # Preserve the union of all requested ranges for MP4 completeness checks.
+    manifest.frame_start = min(manifest.frame_start, frame_start)
+    manifest.frame_end = max(manifest.frame_end, frame_end)
+
     # Load the .blend scene.
     bpy.ops.wm.open_mainfile(filepath=str(blend_path))
 
@@ -271,6 +275,8 @@ def render_frames(
         )
         manifest.save(manifest_path)
         rendered += 1
+    # Persist expanded ranges even if all frames were already rendered.
+    manifest.save(manifest_path)
 
     return {
         "frames_rendered": rendered,
